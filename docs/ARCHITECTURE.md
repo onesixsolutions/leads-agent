@@ -28,13 +28,14 @@ Leads Agent is a webhook service that:
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| **API** | `api.py` | Receives Slack webhooks, filters HubSpot messages, dispatches to classifier |
-| **Models** | `models.py` | `HubSpotLead`, `LeadClassification`, `EnrichedLeadClassification`, research models |
-| **Classifier** | `llm.py` | Classification agent + research agent with web search |
+| **API** | `api.py` | Receives Slack webhooks, filters HubSpot messages, dispatches to processor |
+| **Processor** | `processor.py` | Shared pipeline: classify → format → post (used by API, test, replay) |
+| **Models** | `models.py` | `HubSpotLead`, `LeadClassification`, `EnrichedLeadClassification` |
+| **Classifier** | `llm.py` | Classification agent + research agent with DuckDuckGo search |
 | **Slack** | `slack.py` | Slack SDK wrapper, HMAC signature verification |
 | **Config** | `config.py` | Environment/`.env` settings via pydantic-settings |
-| **CLI** | `cli.py` | Commands: `init`, `run`, `backtest`, `classify`, `pull-history` |
-| **Backtest** | `backtest.py` | Historical lead testing |
+| **CLI** | `cli.py` | Commands: `init`, `run`, `backtest`, `test`, `replay`, `classify` |
+| **Backtest** | `backtest.py` | Fetches historical HubSpot leads from Slack |
 
 ---
 
@@ -98,18 +99,6 @@ class EnrichedLeadClassification(LeadClassification):
     company_research: CompanyResearch | None
     contact_research: ContactResearch | None
     research_summary: str | None
-
-class CompanyResearch(BaseModel):
-    company_name: str
-    company_description: str
-    industry: str | None
-    company_size: str | None
-    website: str | None
-
-class ContactResearch(BaseModel):
-    full_name: str
-    title: str | None
-    linkedin_summary: str | None
 ```
 
 **Research strategy:**
@@ -117,7 +106,7 @@ class ContactResearch(BaseModel):
 2. Broader company search for description/industry
 3. Search contact name + company for role
 
-Uses pydantic-ai's built-in `duckduckgo_search_tool()` with configurable `max_searches` limit.
+Uses pydantic-ai's `duckduckgo_search_tool()` with configurable `max_searches` limit.
 
 ### 5. Response
 
@@ -126,22 +115,65 @@ If `DRY_RUN=false`, posts a threaded reply:
 ```
 🟢 *PROMISING* (92%)
 _Genuine infrastructure consulting inquiry_
-📋 Company: Acme Corp
-```
-
-With enrichment:
-```
-🟢 *PROMISING* (92%)
-_Genuine infrastructure consulting inquiry_
 
 📊 Company Research:
-   Acme Corp: Enterprise software for supply chain management
-   Industry: SaaS / Logistics
-   Website: acme.com
+• Acme Corp: Enterprise software for supply chain management
+• Industry: SaaS / Logistics
+• Website: acme.com
 
 👤 Contact Research:
-   Jane Smith - VP of Engineering
+• Jane Smith - VP of Engineering
 ```
+
+---
+
+## Run Modes
+
+| Mode | Command | Source | Output | Thread? |
+|------|---------|--------|--------|---------|
+| **Production** | `run` | Slack webhook | Production channel | Yes |
+| **Backtest** | `backtest` | Historical leads | Console only | — |
+| **Test** | `test` | Historical leads | Test channel | No |
+| **Replay** | `replay` | Historical leads | Production channel | Yes |
+
+All modes share the same processing pipeline (`processor.py`).
+
+### Production Mode
+
+```bash
+leads-agent run
+```
+
+Receives live webhooks from Slack. When HubSpot posts a lead, classifies it and posts a thread reply.
+
+### Backtest Mode
+
+```bash
+leads-agent backtest --limit 20 --enrich --debug
+```
+
+Console-only testing. No Slack posts. Good for validating classifier behavior.
+
+### Test Mode
+
+```bash
+leads-agent test --limit 5 --enrich
+```
+
+Posts results to `SLACK_TEST_CHANNEL_ID` (not as threads). Safe for testing Slack output format.
+
+### Replay Mode
+
+```bash
+leads-agent replay --limit 5 --enrich --live
+```
+
+Posts results as **thread replies on original messages** in production. Use to backfill classifications on historical leads.
+
+Features:
+- Skips leads that already have replies (configurable)
+- Confirmation prompt before posting
+- Respects `DRY_RUN` config
 
 ---
 
@@ -163,30 +195,6 @@ _Genuine infrastructure consulting inquiry_
 - `message.groups` — Private channel messages
 
 > **Important:** Bot must be invited to channels to receive events.
-
-### Request Verification
-
-All requests are verified via HMAC-SHA256 signature:
-
-```python
-def verify_slack_request(settings, req, body):
-    timestamp = req.headers.get("X-Slack-Request-Timestamp")
-    signature = req.headers.get("X-Slack-Signature")
-    
-    # Reject requests older than 5 minutes
-    if abs(time.time() - int(timestamp)) > 300:
-        return False
-    
-    # Verify HMAC signature
-    basestring = f"v0:{timestamp}:{body.decode()}"
-    expected = "v0=" + hmac.new(
-        signing_secret.encode(),
-        basestring.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    
-    return hmac.compare_digest(expected, signature)
-```
 
 ---
 
@@ -230,48 +238,6 @@ Extract:
 - What is the contact's role/title?
 
 Be efficient - limit your searches. Do NOT make up information.
-```
-
----
-
-## Backtesting
-
-Test the classifier on historical leads before enabling live responses:
-
-```bash
-# Basic backtest
-leads-agent backtest --limit 20
-
-# With enrichment (researches promising leads)
-leads-agent backtest --enrich --limit 10
-
-# Debug mode (shows agent steps, tool calls)
-leads-agent backtest --debug
-
-# Full trace
-leads-agent backtest --enrich --debug --verbose
-```
-
-**Sample output:**
-
-```
-[1] Processing lead...
-    Input: Jane Smith <jane@acme.com>
-    🔧 duckduckgo_search: {"query": "acme.com"}
-    🔧 duckduckgo_search: {"query": "Jane Smith Acme Corp"}
-
-Name: Jane Smith
-Email: jane@acme.com
-Message: We need help with AWS migration...
-
-🟢 PROMISING (92%)
-Reason: Genuine infrastructure consulting inquiry
-Extracted Company: Acme Corp
-
-📊 Company Research:
-   Acme Corp: Enterprise logistics software
-   Industry: SaaS
-   Website: acme.com
 ```
 
 ---
@@ -347,5 +313,10 @@ CMD ["leads-agent", "run", "--host", "0.0.0.0"]
 │                                     Post threaded reply                 │
 │                                     (if not DRY_RUN)                    │
 │                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  CLI MODES:                                                             │
+│    backtest  → Console only (no Slack posts)                            │
+│    test      → Post to SLACK_TEST_CHANNEL_ID (not threaded)             │
+│    replay    → Post as thread replies on original messages              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

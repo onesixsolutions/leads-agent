@@ -192,22 +192,24 @@ def test(
     enrich: bool = typer.Option(False, "--enrich", "-e", help="Research promising leads with web search"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
     test_channel: str = typer.Option(None, "--channel", "-c", help="Test channel ID"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Don't actually post to Slack"),
+    dry_run: bool = typer.Option(None, "--dry-run/--live", help="Override DRY_RUN config setting"),
 ):
     """
     Test mode: process historical leads and post results to a test channel.
 
     Pulls HubSpot leads from SLACK_CHANNEL_ID, processes them,
     and posts results to SLACK_TEST_CHANNEL_ID (not as threads).
+
+    Respects DRY_RUN config setting. Use --dry-run or --live to override.
     """
     from leads_agent.backtest import fetch_hubspot_leads
     from leads_agent.processor import process_and_post
 
     settings = get_settings()
 
-    # Override dry_run if flag is set
-    if dry_run:
-        settings.dry_run = True
+    # Override dry_run if explicitly set
+    if dry_run is not None:
+        settings.dry_run = dry_run
 
     # Determine test channel
     target_channel = test_channel or settings.slack_test_channel_id
@@ -247,6 +249,94 @@ def test(
         rprint("[yellow]No HubSpot leads found in channel history.[/]")
     else:
         rprint(f"\n[green]Processed {count} leads.[/]")
+
+
+@app.command()
+def replay(
+    limit: int = typer.Option(5, "--limit", "-n", help="Number of leads to process"),
+    enrich: bool = typer.Option(False, "--enrich", "-e", help="Research promising leads with web search"),
+    max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
+    dry_run: bool = typer.Option(None, "--dry-run/--live", help="Override DRY_RUN config setting"),
+    skip_replied: bool = typer.Option(True, "--skip-replied/--no-skip-replied", help="Skip already-replied leads"),
+):
+    """
+    Replay mode: process historical leads and post as thread replies.
+
+    Like production mode, but manually triggered on historical messages.
+    Posts classification results as thread replies on the ORIGINAL messages
+    in SLACK_CHANNEL_ID.
+
+    Respects DRY_RUN config setting. Use --dry-run or --live to override.
+    """
+    from leads_agent.backtest import fetch_hubspot_leads
+    from leads_agent.processor import process_and_post
+    from leads_agent.slack import slack_client
+
+    settings = get_settings()
+
+    # Override dry_run if explicitly set
+    if dry_run is not None:
+        settings.dry_run = dry_run
+
+    rprint(Panel.fit("🔄 [bold yellow]Replay Mode[/]", border_style="yellow"))
+    rprint(f"[dim]Channel: {settings.slack_channel_id}[/]")
+    rprint(f"[dim]Limit: {limit} | Enrich: {enrich} | Dry run: {settings.dry_run} | Skip replied: {skip_replied}[/]\n")
+
+    if not settings.dry_run:
+        if not Confirm.ask("[yellow]This will post replies to the production channel. Continue?[/]"):
+            raise typer.Abort()
+
+    client = slack_client(settings) if skip_replied else None
+
+    count = 0
+    skipped = 0
+    for msg, lead in fetch_hubspot_leads(settings, limit=limit * 2 if skip_replied else limit):
+        # Check if message already has replies
+        if skip_replied and client:
+            try:
+                replies = client.conversations_replies(
+                    channel=settings.slack_channel_id,
+                    ts=msg["ts"],
+                    limit=2,  # Just need to know if there are any replies
+                )
+                reply_count = len(replies.get("messages", [])) - 1  # Subtract the parent message
+                if reply_count > 0:
+                    skipped += 1
+                    continue
+            except Exception:
+                pass  # If we can't check, process anyway
+
+        if count >= limit:
+            break
+
+        count += 1
+        rprint(f"[cyan][{count}][/] Processing: {lead.first_name} {lead.last_name} <{lead.email}>")
+        rprint(f"    [dim]Message ts: {msg['ts']}[/]")
+
+        result = process_and_post(
+            settings,
+            lead,
+            channel_id=settings.slack_channel_id,
+            thread_ts=msg["ts"],  # Reply to original message
+            enrich=enrich,
+            max_searches=max_searches,
+            include_lead_info=False,  # Don't include lead info, it's in the parent message
+        )
+
+        label_emoji = {"spam": "🔴", "solicitation": "🟡", "promising": "🟢"}.get(result.label, "⚪")
+        rprint(f"    {label_emoji} {result.label.upper()} ({result.classification.confidence:.0%})")
+
+        if settings.dry_run:
+            rprint("    [dim](dry run - not posted)[/]")
+        else:
+            rprint("    [green]Posted as thread reply[/]")
+
+    if count == 0 and skipped == 0:
+        rprint("[yellow]No HubSpot leads found in channel history.[/]")
+    else:
+        rprint(f"\n[green]Processed {count} leads.[/]")
+        if skipped > 0:
+            rprint(f"[dim]Skipped {skipped} leads that already had replies.[/]")
 
 
 @app.command("pull-history")

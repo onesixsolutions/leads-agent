@@ -13,11 +13,10 @@ dependencies = [
   "slack_sdk>=3.27",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
-  "pydantic-ai>=0.0.12",
+  "pydantic-ai-slim[duckduckgo]>=0.0.12",
   "python-dotenv>=1.0",
   "typer>=0.12",
   "rich>=13.7",
-  "duckduckgo-search>=6.0",  # Web search for lead enrichment
 ]
 
 [project.scripts]

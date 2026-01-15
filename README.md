@@ -20,9 +20,9 @@ When HubSpot posts a lead to your Slack channel, Leads Agent:
 
 - **HubSpot-specific parsing** — Extracts first name, last name, email, company from HubSpot message format
 - **Smart classification** — Infers company from email domain when not provided
-- **Web search enrichment** — Researches promising leads (company info, contact role) using DuckDuckGo
+- **Web search enrichment** — Researches promising leads (company info, contact role) via DuckDuckGo
 - **Threaded replies** — Keeps channels clean by replying in threads
-- **Backtesting** — Test classifier on historical leads before going live
+- **Multiple run modes** — Backtest, test channel, replay to production
 
 ---
 
@@ -55,14 +55,15 @@ leads-agent init
 # Slack
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_SIGNING_SECRET="..."
-export SLACK_CHANNEL_ID="C..."
+export SLACK_CHANNEL_ID="C..."              # Production channel
+export SLACK_TEST_CHANNEL_ID="C..."         # Optional: for test mode
 
 # LLM (OpenAI by default)
 export OPENAI_API_KEY="sk-..."
-export LLM_MODEL_NAME="gpt-4o-mini"  # optional
+export LLM_MODEL_NAME="gpt-4o-mini"         # Optional
 
 # Behavior
-export DRY_RUN="true"  # Set to "false" to post replies
+export DRY_RUN="true"                       # Set to "false" to post replies
 ```
 
 ### Verify Configuration
@@ -112,31 +113,48 @@ leads-agent run [--reload]          # Start API server
 leads-agent classify "message"      # Classify a single message
 leads-agent classify "msg" --enrich # Research promising leads
 
-# Backtesting
-leads-agent backtest --limit 20                    # Test on historical leads
-leads-agent backtest --enrich                      # Include web research
-leads-agent backtest --debug                       # Show agent steps
-leads-agent backtest --enrich --debug --verbose    # Full trace
+# Testing & Validation
+leads-agent backtest --limit 20     # Console-only testing
+leads-agent test --limit 5          # Post to test channel
+leads-agent replay --limit 5        # Post as thread replies to production
 
 # Debugging
-leads-agent pull-history --limit 10 --print        # View raw Slack messages
+leads-agent pull-history --limit 10 --print
 ```
 
-### Enrichment Options
+### Run Modes
 
-When `--enrich` is enabled, promising leads are researched via web search:
+| Command | Description | Output |
+|---------|-------------|--------|
+| `backtest` | Test classifier, console output only | Console |
+| `test` | Process leads, post to test channel | Test channel (main) |
+| `replay` | Process leads, post as thread replies | Production (threads) |
+
+All commands respect the `DRY_RUN` config setting. Override with `--dry-run` or `--live`.
+
+### Common Options
 
 | Option | Description |
 |--------|-------------|
-| `--enrich`, `-e` | Enable web search for promising leads |
-| `--max-searches` | Limit searches per lead (default: 4) |
+| `--enrich`, `-e` | Research promising leads via web search |
+| `--limit`, `-n` | Number of leads to process |
+| `--max-searches` | Limit web searches per lead (default: 4) |
+| `--dry-run` / `--live` | Override DRY_RUN config |
 | `--debug`, `-d` | Show agent steps and token usage |
 | `--verbose`, `-v` | Show full message history |
 
-**What gets researched:**
-- Company website and description (via email domain search)
-- Industry and company size
-- Contact's role/title
+### Examples
+
+```bash
+# Backtest with enrichment and debug output
+leads-agent backtest --limit 10 --enrich --debug
+
+# Test on separate channel (safe)
+leads-agent test --limit 5 --enrich
+
+# Replay to production (posts thread replies)
+leads-agent replay --limit 5 --enrich --live
+```
 
 ---
 
@@ -171,11 +189,12 @@ Any OpenAI-compatible API works — set `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `O
 leads-agent/
 ├── src/leads_agent/
 │   ├── api.py        # FastAPI webhook handler
-│   ├── cli.py        # Typer CLI
+│   ├── cli.py        # Typer CLI (init, run, backtest, test, replay, etc.)
 │   ├── config.py     # Settings (pydantic-settings)
 │   ├── models.py     # HubSpotLead, LeadClassification, research models
 │   ├── llm.py        # Classification + research agents
-│   ├── backtest.py   # Historical lead testing
+│   ├── processor.py  # Shared processing pipeline
+│   ├── backtest.py   # Historical lead fetching
 │   └── slack.py      # Slack client & signature verification
 ├── docs/ARCHITECTURE.md
 ├── slack-app-manifest.yml
