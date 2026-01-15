@@ -59,15 +59,15 @@ def init(
     )
 
     rprint("\n[bold]LLM Configuration[/]")
-    rprint("[dim]Default uses local Ollama; change for OpenAI/other providers[/]\n")
+    rprint("[dim]Default uses OpenAI; set LLM_BASE_URL for Ollama/other providers[/]\n")
 
-    llm_base_url = Prompt.ask(
-        "  [cyan]LLM_BASE_URL[/]",
-        default="http://localhost:11434/v1",
+    openai_api_key = Prompt.ask(
+        "  [cyan]OPENAI_API_KEY[/]",
+        default="sk-...",
     )
     llm_model_name = Prompt.ask(
         "  [cyan]LLM_MODEL_NAME[/]",
-        default="llama3.1:8b",
+        default="gpt-4o-mini",
     )
 
     rprint("\n[bold]Runtime Options[/]")
@@ -79,9 +79,11 @@ SLACK_BOT_TOKEN={slack_bot_token}
 SLACK_SIGNING_SECRET={slack_signing_secret}
 SLACK_CHANNEL_ID={slack_channel_id}
 
-# LLM configuration
-LLM_BASE_URL={llm_base_url}
+# LLM configuration (OpenAI by default)
+OPENAI_API_KEY={openai_api_key}
 LLM_MODEL_NAME={llm_model_name}
+# Uncomment for Ollama or other OpenAI-compatible providers:
+# LLM_BASE_URL=http://localhost:11434/v1
 
 # Runtime
 DRY_RUN={str(dry_run).lower()}
@@ -107,7 +109,8 @@ def config():
 
     table.add_row("SLACK_BOT_TOKEN", _mask(settings.slack_bot_token))
     table.add_row("SLACK_SIGNING_SECRET", _mask(settings.slack_signing_secret))
-    table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id)
+    table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id or "[not set]")
+    table.add_row("OPENAI_API_KEY", _mask(settings.openai_api_key))
     table.add_row("LLM_BASE_URL", settings.llm_base_url)
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("DRY_RUN", str(settings.dry_run))
@@ -160,28 +163,49 @@ def backtest(
 @app.command()
 def classify(
     message: str = typer.Argument(..., help="Message text to classify"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Show message history and agent trace"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full message content (no truncation)"),
 ):
     """Classify a single message (for quick testing)."""
-    from leads_agent.llm import classify_message
+    from leads_agent.llm import ClassificationResult, classify_message
 
     settings = get_settings()
 
     rprint(Panel.fit("🧠 [bold yellow]Classifying Message[/]", border_style="yellow"))
     rprint(f"[dim]{message}[/]\n")
 
-    result = classify_message(settings, message)
+    result = classify_message(settings, message, debug=debug)
+
+    # Handle both return types
+    if isinstance(result, ClassificationResult):
+        classification = result.classification
+        label_value = result.label
+        confidence = result.confidence
+        reason = result.reason
+    else:
+        classification = result
+        label_value = result.label.value
+        confidence = result.confidence
+        reason = result.reason
 
     table = Table(show_header=False, box=None)
     table.add_column("Field", style="cyan")
     table.add_column("Value")
 
-    label_color = {"spam": "red", "solicitation": "yellow", "promising": "green"}.get(result.label.value, "white")
+    label_color = {"spam": "red", "solicitation": "yellow", "promising": "green"}.get(label_value, "white")
 
-    table.add_row("Label", f"[bold {label_color}]{result.label.value}[/]")
-    table.add_row("Confidence", f"{result.confidence:.0%}")
-    table.add_row("Reason", result.reason)
+    table.add_row("Label", f"[bold {label_color}]{label_value}[/]")
+    table.add_row("Confidence", f"{confidence:.0%}")
+    table.add_row("Reason", reason)
 
     console.print(table)
+
+    # Show debug info if requested
+    if debug and isinstance(result, ClassificationResult):
+        rprint("\n[bold cyan]─── Debug Info ───[/]")
+        rprint(f"[dim]Token usage:[/] {result.usage}")
+        rprint(f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]")
+        rprint(f"[dim]{result.format_history(verbose=verbose)}[/]")
 
 
 def main():

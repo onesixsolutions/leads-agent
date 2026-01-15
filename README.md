@@ -36,7 +36,7 @@ leads-agent run
 
 - **Python 3.11+**
 - **[uv](https://docs.astral.sh/uv/)** — Fast Python package manager
-- **[Ollama](https://ollama.ai/)** (optional) — For local LLM inference
+- **[OpenAI API key](https://platform.openai.xcom/api-keys)** — For LLM inference (or use Ollama locally)
 
 ### Install with uv
 
@@ -82,8 +82,8 @@ Export directly in your shell or CI/CD:
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_SIGNING_SECRET="..."
 export SLACK_CHANNEL_ID="C..."
-export LLM_BASE_URL="http://localhost:11434/v1"
-export LLM_MODEL_NAME="llama3.1:8b"
+export OPENAI_API_KEY="sk-..."
+export LLM_MODEL_NAME="gpt-4o-mini"
 export DRY_RUN="true"
 ```
 
@@ -156,7 +156,9 @@ Skip to [Invite the Bot](#step-6-invite-the-bot).
    ```
    https://your-domain.com/slack/events
    ```
-   > 💡 For local development, use [ngrok](https://ngrok.com/): `ngrok http 8000`
+   > 💡 For local development use
+   >  - [ngrok](https://ngrok.com/): `ngrok http 8000`
+   >  - [tailscale](https://tailscale.com/): `tailscale funnel 8000`
 4. Slack will send a verification challenge — your server must be running!
 
 #### Step 5: Subscribe to Bot Events
@@ -232,6 +234,16 @@ leads-agent run
 
 ## LLM Configuration
 
+### OpenAI (Default)
+
+```bash
+# Set your API key
+export OPENAI_API_KEY="sk-..."
+
+# Optionally change the model (default: gpt-4o-mini)
+export LLM_MODEL_NAME="gpt-4o"
+```
+
 ### Local (Ollama)
 
 ```bash
@@ -241,22 +253,15 @@ ollama serve
 # Pull a model
 ollama pull llama3.1:8b
 
-# Use defaults
+# Configure for Ollama
 export LLM_BASE_URL="http://localhost:11434/v1"
 export LLM_MODEL_NAME="llama3.1:8b"
-```
-
-### OpenAI
-
-```bash
-export LLM_BASE_URL="https://api.openai.com/v1"
-export LLM_MODEL_NAME="gpt-4o-mini"
-export OPENAI_API_KEY="sk-..."
+# No OPENAI_API_KEY needed for Ollama
 ```
 
 ### Other Providers
 
-Any OpenAI-compatible API works. Just set `LLM_BASE_URL` and `LLM_MODEL_NAME` accordingly.
+Any OpenAI-compatible API works. Set `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `OPENAI_API_KEY` accordingly.
 
 ---
 
@@ -324,8 +329,9 @@ leads-agent/
 
 ### LLM connection errors
 
-- For Ollama: ensure `ollama serve` is running
-- Verify `LLM_BASE_URL` is reachable
+- Verify `OPENAI_API_KEY` is set and valid
+- For Ollama: ensure `ollama serve` is running and `LLM_BASE_URL` is set
+- Check that `LLM_MODEL_NAME` is a valid model for your provider
 
 ---
 

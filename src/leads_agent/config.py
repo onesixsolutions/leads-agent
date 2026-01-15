@@ -1,7 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_dotenv() -> Path | None:
+    """Search for .env file from cwd upward to find project root."""
+    current = Path.cwd()
+    for parent in [current, *current.parents]:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return candidate
+        # Stop at common project root indicators
+        if (parent / "pyproject.toml").is_file() or (parent / ".git").is_dir():
+            # Check one more time in case .env is here
+            if candidate.is_file():
+                return candidate
+            break
+    return None
 
 
 class Settings(BaseSettings):
@@ -9,10 +27,11 @@ class Settings(BaseSettings):
     Runtime configuration.
 
     Values are loaded from environment variables and `.env` (if present).
+    Searches for .env from current directory upward to project root.
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_find_dotenv(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -22,9 +41,10 @@ class Settings(BaseSettings):
     slack_signing_secret: SecretStr | None = Field(default=None, validation_alias="SLACK_SIGNING_SECRET")
     slack_channel_id: str | None = Field(default=None, validation_alias="SLACK_CHANNEL_ID")
 
-    # LLM (OpenAI-compatible API; defaults work for Ollama)
-    llm_base_url: str = Field(default="http://localhost:11434/v1", validation_alias="LLM_BASE_URL")
-    llm_model_name: str = Field(default="llama3.1:8b", validation_alias="LLM_MODEL_NAME")
+    # LLM (OpenAI by default; works with any OpenAI-compatible API)
+    llm_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="LLM_BASE_URL")
+    llm_model_name: str = Field(default="gpt-4o-mini", validation_alias="LLM_MODEL_NAME")
+    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
 
     # Behavior
     dry_run: bool = Field(default=True, validation_alias="DRY_RUN")

@@ -561,15 +561,17 @@ CMD ["leads-agent", "run", "--host", "0.0.0.0", "--port", "8000"]
 **Environment variables in production:**
 
 ```bash
-# Required
+# Required — Slack
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_SIGNING_SECRET=...
 SLACK_CHANNEL_ID=C...
 
-# LLM (use OpenAI in production for reliability)
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL_NAME=gpt-4o-mini
+# Required — LLM (OpenAI by default)
 OPENAI_API_KEY=sk-...
+LLM_MODEL_NAME=gpt-4o-mini
+
+# Optional — for Ollama or other OpenAI-compatible providers
+# LLM_BASE_URL=http://localhost:11434/v1
 
 # Enable responses
 DRY_RUN=false
@@ -593,8 +595,8 @@ DRY_RUN=false
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │ HubSpot  │───▶│  Slack   │───▶│ Leads Agent  │───▶│ LLM (Ollama/     │  │
-│  │ Workflow │    │ Channel  │    │ POST /slack/ │    │ OpenAI)          │  │
+│  │ HubSpot  │───▶│  Slack   │───▶│ Leads Agent  │───▶│ LLM (OpenAI/     │  │
+│  │ Workflow │    │ Channel  │    │ POST /slack/ │    │ Ollama)          │  │
 │  │          │    │          │◀───│ events       │◀───│                  │  │
 │  └──────────┘    └──────────┘    └──────────────┘    └──────────────────┘  │
 │       │               │                │                      │            │
