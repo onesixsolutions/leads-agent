@@ -257,6 +257,15 @@ def classify(
     table.add_row("Confidence", f"{confidence:.0%}")
     table.add_row("Reason", reason)
 
+    # Show extracted contact info if present
+    if classification.first_name or classification.last_name:
+        name = f"{classification.first_name or ''} {classification.last_name or ''}".strip()
+        table.add_row("Name", name)
+    if classification.email:
+        table.add_row("Email", classification.email)
+    if classification.company:
+        table.add_row("Company", classification.company)
+
     console.print(table)
 
     # Show debug info if requested

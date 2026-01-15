@@ -10,20 +10,23 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from .config import Settings
-from .models import LeadClassification
+from .models import HubSpotLead, LeadClassification
 
 SYSTEM_PROMPT = """\
 You classify inbound leads from a consulting company contact form.
 
-Definitions:
-- spam: irrelevant, automated, SEO, crypto, junk
-- solicitation: vendors, sales pitches, recruiters, partnerships
+You will receive lead information including name, email, and their message.
+Extract and return the contact details along with your classification.
+
+Classification labels:
+- spam: irrelevant, automated, SEO/link-building, crypto, junk
+- solicitation: vendors, sales pitches, recruiters, partnership offers
 - promising: genuine inquiry about services or collaboration
 
 Rules:
-- Be conservative
-- If unclear, choose spam
-- Provide a short reason
+- Be conservative — if unclear, choose spam
+- Extract the company name from the message or email domain if not provided
+- Provide a brief reason for your classification
 """
 
 
@@ -109,15 +112,15 @@ def agent_factory(
     )
 
 
-def classify_message(
-    settings: Settings, text: str, *, debug: bool = False
+def classify_lead(
+    settings: Settings, lead: HubSpotLead, *, debug: bool = False
 ) -> LeadClassification | ClassificationResult:
     """
-    Classify a message using the LLM agent.
+    Classify a HubSpot lead using the LLM agent.
 
     Args:
         settings: Application settings with LLM config
-        text: Message text to classify
+        lead: Parsed HubSpot lead data
         debug: If True, return ClassificationResult with full message history
 
     Returns:
@@ -129,7 +132,10 @@ def classify_message(
         settings.llm_model_name,
         api_key,
     )
-    result = agent.run_sync(text)
+
+    # Build prompt from lead data
+    prompt = lead.to_prompt_text()
+    result = agent.run_sync(prompt)
 
     if debug:
         return ClassificationResult(
@@ -143,3 +149,24 @@ def classify_message(
         )
 
     return result.output
+
+
+def classify_message(
+    settings: Settings, text: str, *, debug: bool = False
+) -> LeadClassification | ClassificationResult:
+    """
+    Classify a raw message text using the LLM agent.
+
+    This is a convenience wrapper that creates a HubSpotLead from raw text.
+
+    Args:
+        settings: Application settings with LLM config
+        text: Raw message text to classify
+        debug: If True, return ClassificationResult with full message history
+
+    Returns:
+        LeadClassification if debug=False, ClassificationResult if debug=True
+    """
+    # Create a simple lead with just the raw text
+    lead = HubSpotLead(raw_text=text, message=text)
+    return classify_lead(settings, lead, debug=debug)

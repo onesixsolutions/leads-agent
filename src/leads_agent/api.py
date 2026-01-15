@@ -6,40 +6,75 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Request
 
 from .config import Settings, get_settings
-from .llm import classify_message
+from .llm import classify_lead
+from .models import HubSpotLead
 from .slack import slack_client, verify_slack_request
 
 
-def _is_relevant_slack_message_event(settings: Settings, event: dict[str, Any]) -> bool:
+def _is_hubspot_message(settings: Settings, event: dict[str, Any]) -> bool:
+    """Check if event is a HubSpot bot message we should process."""
     if event.get("type") != "message":
         return False
     if settings.slack_channel_id and event.get("channel") != settings.slack_channel_id:
         return False
-    if event.get("subtype"):
+    # Must be a bot_message subtype
+    if event.get("subtype") != "bot_message":
         return False
-    if event.get("thread_ts"):
+    # Must be from HubSpot
+    if event.get("username", "").lower() != "hubspot":
         return False
-    if not str(event.get("text", "")).strip():
+    # Skip thread replies
+    if event.get("thread_ts") and event.get("thread_ts") != event.get("ts"):
+        return False
+    # Must have attachments (where HubSpot puts lead data)
+    if not event.get("attachments"):
         return False
     return True
 
 
-def _handle_message_event(settings: Settings, event: dict[str, Any]) -> None:
-    text = str(event.get("text", "")).strip()
-    result = classify_message(settings, text)
+def _handle_hubspot_lead(settings: Settings, event: dict[str, Any]) -> None:
+    """Process a HubSpot lead message."""
+    # Parse the HubSpot message
+    lead = HubSpotLead.from_slack_event(event)
+    if not lead:
+        print("[SKIP] Could not parse HubSpot message")
+        return
 
-    print("\nLIVE EVENT")
-    print(text)
-    print(result)
+    print("\n[HUBSPOT LEAD]")
+    print(f"  Name: {lead.first_name} {lead.last_name}")
+    print(f"  Email: {lead.email}")
+    print(f"  Company: {lead.company}")
+    print(f"  Message: {lead.message[:100] if lead.message else 'N/A'}...")
+
+    # Classify the lead
+    result = classify_lead(settings, lead)
+
+    print("\n[CLASSIFICATION]")
+    print(f"  Label: {result.label.value}")
+    print(f"  Confidence: {result.confidence:.0%}")
+    print(f"  Reason: {result.reason}")
 
     if settings.dry_run:
+        print("[DRY RUN] Would post to Slack")
         return
+
+    # Build response message
+    label_emoji = {"spam": "🔴", "solicitation": "🟡", "promising": "🟢"}.get(result.label.value, "⚪")
+
+    response_parts = [
+        f"{label_emoji} *{result.label.value.upper()}* ({result.confidence:.0%})",
+        f"_{result.reason}_",
+    ]
+
+    # Add extracted info if available
+    if result.company and result.company != lead.company:
+        response_parts.append(f"\n📋 Company: {result.company}")
 
     client = slack_client(settings)
     client.chat_postMessage(
         channel=event["channel"],
         thread_ts=event["ts"],
-        text=f"\U0001f9e0 Lead classification: *{result.label}* ({result.confidence:.2f})\n_{result.reason}_",
+        text="\n".join(response_parts),
     )
 
 
@@ -90,8 +125,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event = payload.get("event", {}) or {}
 
         # Always ack quickly; do work async
-        if _is_relevant_slack_message_event(settings, event):
-            background.add_task(_handle_message_event, settings, event)
+        if _is_hubspot_message(settings, event):
+            print("  [OK] HubSpot lead detected, processing...")
+            background.add_task(_handle_hubspot_lead, settings, event)
+        else:
+            print(f"  [SKIP] Not a HubSpot message (subtype={event.get('subtype')}, username={event.get('username')})")
 
         return {"ok": True}
 
