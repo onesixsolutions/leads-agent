@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Behavior
     dry_run: bool = Field(default=True, validation_alias="DRY_RUN")
 
+    # Note: Prompt configuration is handled separately via PROMPT_CONFIG_PATH env var
+    # or auto-discovered prompt_config.json file. See leads_agent.prompts module.
+
     def require_slack(self) -> "Settings":
         missing: list[str] = []
         if self.slack_bot_token is None:

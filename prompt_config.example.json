@@ -1,0 +1,34 @@
+{
+  "company_name": "Acme Consulting",
+  "services_description": "AI/ML consulting, custom software development, and data engineering",
+
+  "icp": {
+    "description": "Mid-market B2B SaaS companies looking to leverage AI/ML in their products",
+    "target_industries": ["SaaS", "FinTech", "HealthTech", "E-commerce"],
+    "target_company_sizes": ["SMB", "Mid-Market", "Growth-stage Startup"],
+    "target_roles": ["CTO", "VP Engineering", "Head of Data", "Technical Founder"],
+    "geographic_focus": ["US", "Canada", "UK"],
+    "disqualifying_signals": [
+      "Requesting free services",
+      "Student projects",
+      "Personal use",
+      "No clear business need"
+    ]
+  },
+
+  "qualifying_questions": [
+    "Does this look like a real business need vs. a student/personal project?",
+    "Is there budget indication or enterprise context?",
+    "Is the request aligned with our core services (AI/ML, software, data)?",
+    "Does the company size/stage match our target market?"
+  ],
+
+  "custom_instructions": "Pay special attention to leads from the FinTech and HealthTech sectors as these are priority verticals.",
+
+  "research_focus_areas": [
+    "Company's current tech stack",
+    "Recent funding or growth indicators",
+    "Existing AI/ML initiatives",
+    "Team size and engineering capacity"
+  ]
+}

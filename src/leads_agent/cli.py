@@ -1,5 +1,6 @@
 """Rich CLI for leads-agent."""
 
+import json
 from pathlib import Path
 
 import typer
@@ -7,9 +8,11 @@ from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.syntax import Syntax
 from rich.table import Table
 
 from leads_agent.config import get_settings
+from leads_agent.prompts import get_prompt_manager
 
 app = typer.Typer(
     name="leads-agent",
@@ -77,6 +80,49 @@ def init(
     rprint("\n[bold]Runtime Options[/]")
     dry_run = Confirm.ask("  [cyan]DRY_RUN[/] (don't post replies)?", default=True)
 
+    # Prompt Configuration
+    rprint("\n[bold]Prompt Configuration[/] [dim](customize lead classification)[/]")
+    configure_prompts = Confirm.ask("  Configure ICP and qualifying criteria?", default=False)
+
+    prompt_config: dict = {}
+    if configure_prompts:
+        rprint("\n  [dim]Leave blank to skip any field[/]\n")
+
+        company_name = Prompt.ask("  [cyan]Company name[/]", default="")
+        if company_name:
+            prompt_config["company_name"] = company_name
+
+        services_desc = Prompt.ask("  [cyan]Services description[/]", default="")
+        if services_desc:
+            prompt_config["services_description"] = services_desc
+
+        rprint("\n  [bold]Ideal Client Profile (ICP)[/]")
+        icp_desc = Prompt.ask("  [cyan]ICP description[/] [dim](e.g., 'Mid-market B2B SaaS')[/]", default="")
+        target_industries = Prompt.ask("  [cyan]Target industries[/] [dim](comma-separated)[/]", default="")
+        target_sizes = Prompt.ask(
+            "  [cyan]Target company sizes[/] [dim](e.g., SMB, Mid-Market, Enterprise)[/]", default=""
+        )
+
+        if any([icp_desc, target_industries, target_sizes]):
+            icp: dict = {}
+            if icp_desc:
+                icp["description"] = icp_desc
+            if target_industries:
+                icp["target_industries"] = [s.strip() for s in target_industries.split(",")]
+            if target_sizes:
+                icp["target_company_sizes"] = [s.strip() for s in target_sizes.split(",")]
+            prompt_config["icp"] = icp
+
+        rprint("\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]")
+        questions = []
+        while True:
+            q = Prompt.ask("  [cyan]Question[/]", default="")
+            if not q:
+                break
+            questions.append(q)
+        if questions:
+            prompt_config["qualifying_questions"] = questions
+
     # Build env content
     env_lines = [
         "# Slack credentials",
@@ -101,11 +147,79 @@ def init(
         ]
     )
 
+    # Determine prompt config file path (same directory as .env)
+    prompt_config_path = output.parent / "prompt_config.json"
+
+    # Add prompt configuration reference
+    if prompt_config:
+        env_lines.extend(
+            [
+                "",
+                "# Prompt Configuration (ICP, qualifying questions, etc.)",
+                "# Points to JSON file - edit prompt_config.json to customize",
+                f"PROMPT_CONFIG_PATH={prompt_config_path}",
+            ]
+        )
+    else:
+        env_lines.extend(
+            [
+                "",
+                "# Prompt Configuration (ICP, qualifying questions, etc.)",
+                "# Uncomment and create prompt_config.json to customize classification",
+                "# See prompt_config.example.json for all available options",
+                f"# PROMPT_CONFIG_PATH={prompt_config_path}",
+            ]
+        )
+
     env_content = "\n".join(env_lines) + "\n"
 
+    # Write .env file
     output.write_text(env_content)
     rprint(f"\n[green]✓[/] Configuration written to [bold]{output}[/]")
-    rprint("[dim]Run [bold]leads-agent config[/] to verify settings[/]")
+
+    # Write prompt_config.json if configured
+    if prompt_config:
+        prompt_config_content = json.dumps(prompt_config, indent=2)
+        prompt_config_path.write_text(prompt_config_content + "\n")
+        rprint(f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]")
+    else:
+        rprint(f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]")
+
+    rprint("\n[dim]Run [bold]leads-agent config[/] to verify settings[/]")
+    rprint("[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")
+
+
+def _mask(secret, visible: int = 4) -> str:
+    """Mask a secret string, handling SecretStr or None."""
+    if secret is None:
+        return "[not set]"
+    # Handle pydantic SecretStr
+    val = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
+    if len(val) <= visible:
+        return "***"
+    return val[:visible] + "*" * (len(val) - visible)
+
+
+def _find_prompt_config_source() -> str | None:
+    """Find where prompt configuration is being loaded from."""
+    import os
+
+    # Check env var first
+    env_path = os.environ.get("PROMPT_CONFIG_PATH")
+    if env_path and Path(env_path).is_file():
+        return env_path
+
+    # Check default locations
+    candidates = [
+        Path("prompt_config.json"),
+        Path("config/prompt_config.json"),
+        Path.cwd() / "prompt_config.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
 
 
 @app.command()
@@ -130,18 +244,103 @@ def config():
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("DRY_RUN", str(settings.dry_run))
 
+    # Show prompt config path
+    prompt_config_source = _find_prompt_config_source()
+    table.add_row("PROMPT_CONFIG", prompt_config_source or "[default]")
+
     console.print(table)
 
+    if prompt_config_source:
+        rprint("\n[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")
 
-def _mask(secret, visible: int = 4) -> str:
-    """Mask a secret string, handling SecretStr or None."""
-    if secret is None:
-        return "[not set]"
-    # Handle pydantic SecretStr
-    val = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
-    if len(val) <= visible:
-        return "***"
-    return val[:visible] + "*" * (len(val) - visible)
+
+@app.command()
+def prompts(
+    show_full: bool = typer.Option(False, "--full", "-f", help="Show full rendered prompts"),
+    as_json: bool = typer.Option(False, "--json", "-j", help="Output configuration as JSON"),
+):
+    """Display current prompt configuration."""
+    manager = get_prompt_manager()
+    config = manager.config
+
+    if as_json:
+        # Output raw JSON for scripting
+        rprint(json.dumps(config.model_dump(exclude_none=True), indent=2))
+        return
+
+    rprint(Panel.fit("📝 [bold cyan]Prompt Configuration[/]", border_style="cyan"))
+
+    # Show source of configuration
+    config_source = _find_prompt_config_source()
+    if config_source:
+        rprint(f"[dim]Loaded from: {config_source}[/]\n")
+
+    # Check if configuration is empty
+    if config.is_empty():
+        rprint("[yellow]No custom prompt configuration set.[/]")
+        rprint("[dim]Using default prompts. To customize:[/]")
+        rprint("[dim]  1. Run [bold]leads-agent init[/] and configure prompts[/]")
+        rprint("[dim]  2. Set PROMPT_CONFIG_JSON environment variable[/]")
+        rprint("[dim]  3. Create prompt_config.json file (see prompt_config.example.json)[/]")
+        rprint("[dim]  4. Use the API: PUT /config/prompts[/]")
+
+        if show_full:
+            rprint("\n[bold]Default Classification Prompt:[/]")
+            rprint(Syntax(manager.build_classification_prompt(), "text", theme="monokai", word_wrap=True))
+        return
+
+    # Show company info
+    if config.company_name or config.services_description:
+        rprint("[bold]Company:[/]")
+        if config.company_name:
+            rprint(f"  [cyan]Name:[/] {config.company_name}")
+        if config.services_description:
+            rprint(f"  [cyan]Services:[/] {config.services_description}")
+        rprint()
+
+    # ICP section
+    if config.icp:
+        icp = config.icp
+        rprint("[bold]Ideal Client Profile (ICP):[/]")
+        if icp.description:
+            rprint(f"  [cyan]Description:[/] {icp.description}")
+        if icp.target_industries:
+            rprint(f"  [cyan]Industries:[/] {', '.join(icp.target_industries)}")
+        if icp.target_company_sizes:
+            rprint(f"  [cyan]Company Sizes:[/] {', '.join(icp.target_company_sizes)}")
+        if icp.target_roles:
+            rprint(f"  [cyan]Target Roles:[/] {', '.join(icp.target_roles)}")
+        if icp.geographic_focus:
+            rprint(f"  [cyan]Geographic Focus:[/] {', '.join(icp.geographic_focus)}")
+        if icp.disqualifying_signals:
+            rprint(f"  [cyan]Disqualifying:[/] {', '.join(icp.disqualifying_signals)}")
+
+    # Qualifying questions
+    if config.qualifying_questions:
+        rprint("\n[bold]Qualifying Questions:[/]")
+        for i, q in enumerate(config.qualifying_questions, 1):
+            rprint(f"  [dim]{i}.[/] {q}")
+
+    # Custom instructions
+    if config.custom_instructions:
+        rprint("\n[bold]Custom Instructions:[/]")
+        rprint(f"  [dim]{config.custom_instructions}[/]")
+
+    # Research focus areas
+    if config.research_focus_areas:
+        rprint("\n[bold]Research Focus Areas:[/]")
+        for area in config.research_focus_areas:
+            rprint(f"  • {area}")
+
+    # Show full prompts if requested
+    if show_full:
+        rprint("\n" + "─" * 60)
+        rprint("[bold]Full Classification Prompt:[/]")
+        rprint(Syntax(manager.build_classification_prompt(), "text", theme="monokai", word_wrap=True))
+
+        rprint("\n" + "─" * 60)
+        rprint("[bold]Full Research Prompt:[/]")
+        rprint(Syntax(manager.build_research_prompt(), "text", theme="monokai", word_wrap=True))
 
 
 @app.command()
@@ -352,8 +551,6 @@ def pull_history(
     print_only: bool = typer.Option(False, "--print", "-p", help="Print to console instead of saving to file"),
 ):
     """Fetch Slack channel history and save to JSON."""
-    import json
-
     from slack_sdk.errors import SlackApiError
 
     from leads_agent.slack import slack_client

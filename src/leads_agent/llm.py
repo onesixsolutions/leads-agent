@@ -12,41 +12,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from .config import Settings
 from .models import EnrichedLeadClassification, HubSpotLead, LeadClassification
-
-SYSTEM_PROMPT = """\
-You classify inbound leads from a consulting company contact form.
-
-You will receive lead information including name, email, and their message.
-Extract and return the contact details along with your classification.
-
-Classification labels:
-- spam: irrelevant, automated, SEO/link-building, crypto, junk
-- solicitation: vendors, sales pitches, recruiters, partnership offers
-- promising: genuine inquiry about services or collaboration
-
-Rules:
-- Be conservative — if unclear, choose spam
-- Extract the company name from the message or email domain if not provided
-- Provide a brief reason for your classification
-"""
-
-RESEARCH_PROMPT = """\
-You are researching a promising sales lead to gather context before outreach.
-
-You have access to DuckDuckGo search tool. Use it to research:
-1. The COMPANY - search for the company website/domain first, then do a broader search
-2. The CONTACT PERSON - search for their name + company to find their role
-
-From relevant search results, extract the following information:
-- What does the company do?
-- What industry are they in?
-- What is the contact's role/title?
-
-Be efficient - limit your searches to get the essential information.
-Do NOT make up information - only include what you find from searches.
-
-If you cannot find enough information to form a reasonable view, return **None**
-"""
+from .prompts import get_prompt_manager
 
 
 @dataclass
@@ -112,13 +78,27 @@ def agent_factory(
     llm_base_url: str,
     llm_model_name: str,
     llm_api_key: str = "ollama",
-    instructions: str = SYSTEM_PROMPT,
-    extra_tools: list[Callable] | None = None,
+    instructions: str | None = None,
+    extra_tools: tuple[Callable, ...] | None = None,
 ) -> Agent[None, LeadClassification]:
+    """
+    Create a classification agent.
+
+    Args:
+        llm_base_url: Base URL for the LLM API
+        llm_model_name: Model name to use
+        llm_api_key: API key for the LLM
+        instructions: System prompt (uses prompt manager if not provided)
+        extra_tools: Additional tools for the agent (tuple for hashability)
+    """
     provider = OpenAIProvider(base_url=llm_base_url, api_key=llm_api_key)
     model = OpenAIChatModel(model_name=llm_model_name, provider=provider)
 
-    tools = [] + (extra_tools or [])
+    # Use provided instructions or get from prompt manager
+    if instructions is None:
+        instructions = get_prompt_manager().build_classification_prompt()
+
+    tools = list(extra_tools) if extra_tools else []
 
     return Agent(
         model=model,
@@ -135,15 +115,28 @@ def _create_research_agent(
     llm_base_url: str,
     llm_model_name: str,
     llm_api_key: str = "ollama",
+    instructions: str | None = None,
 ) -> Agent[None, EnrichedLeadClassification]:
-    """Create a research agent with web search capability."""
+    """
+    Create a research agent with web search capability.
+
+    Args:
+        llm_base_url: Base URL for the LLM API
+        llm_model_name: Model name to use
+        llm_api_key: API key for the LLM
+        instructions: System prompt (uses prompt manager if not provided)
+    """
     provider = OpenAIProvider(base_url=llm_base_url, api_key=llm_api_key)
     model = OpenAIChatModel(model_name=llm_model_name, provider=provider)
+
+    # Use provided instructions or get from prompt manager
+    if instructions is None:
+        instructions = get_prompt_manager().build_research_prompt()
 
     return Agent(
         model=model,
         output_type=EnrichedLeadClassification,
-        instructions=RESEARCH_PROMPT,
+        instructions=instructions,
         retries=2,
         end_strategy="early",
         model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=8000),
@@ -174,10 +167,16 @@ def classify_lead(
         or ClassificationResult if debug=True
     """
     api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+
+    # Get the current prompt from prompt manager (allows runtime updates)
+    prompt_manager = get_prompt_manager()
+    classification_prompt = prompt_manager.build_classification_prompt()
+
     agent = agent_factory(
         settings.llm_base_url,
         settings.llm_model_name,
         api_key,
+        instructions=classification_prompt,
     )
 
     # Build prompt from lead data
@@ -234,11 +233,16 @@ def _research_lead(
     """
     api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
 
+    # Get the current research prompt from prompt manager
+    prompt_manager = get_prompt_manager()
+    research_prompt = prompt_manager.build_research_prompt()
+
     # Create research agent
     research_agent = _create_research_agent(
         settings.llm_base_url,
         settings.llm_model_name,
         api_key,
+        instructions=research_prompt,
     )
 
     # Build research prompt with lead context

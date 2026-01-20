@@ -114,8 +114,10 @@ leads-agent config
 ## CLI Commands
 
 ```bash
-leads-agent init                    # Setup wizard
+leads-agent init                    # Setup wizard (includes prompt config)
 leads-agent config                  # Show configuration
+leads-agent prompts                 # Show prompt configuration
+leads-agent prompts --full          # Show rendered prompts
 leads-agent run [--reload]          # Start API server
 
 # Classification
@@ -192,19 +194,87 @@ Any OpenAI-compatible API works — set `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `O
 
 ---
 
+## Prompt Configuration
+
+Customize the classification behavior for your deployment without modifying code. Configure:
+- **Company context** — Your company name and services
+- **Ideal Client Profile (ICP)** — Target industries, company sizes, roles
+- **Qualifying questions** — Custom criteria for lead evaluation
+- **Research focus areas** — What to look for when enriching leads
+
+### Configuration File
+
+Create `prompt_config.json` in your project root (copy from [`prompt_config.example.json`](prompt_config.example.json)):
+
+```bash
+cp prompt_config.example.json prompt_config.json
+# Edit with your company's ICP, questions, etc.
+```
+
+Or use `leads-agent init` to create it interactively.
+
+The file is auto-discovered from the current directory. To use a different location:
+
+```bash
+export PROMPT_CONFIG_PATH=/path/to/my-config.json
+```
+
+### Example Configuration
+
+```json
+{
+  "company_name": "Acme Consulting",
+  "services_description": "AI/ML consulting and custom software development",
+  "icp": {
+    "description": "Mid-market B2B SaaS companies",
+    "target_industries": ["SaaS", "FinTech", "HealthTech"],
+    "target_company_sizes": ["SMB", "Mid-Market"],
+    "target_roles": ["CTO", "VP Engineering", "Head of Data"]
+  },
+  "qualifying_questions": [
+    "Does this look like a real business need?",
+    "Is there budget indication or enterprise context?"
+  ]
+}
+```
+
+### View Current Configuration
+
+```bash
+leads-agent prompts           # Show configuration summary
+leads-agent prompts --full    # Show full rendered prompts
+leads-agent prompts --json    # Output as JSON
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/config/prompts` | GET | Get current configuration and rendered prompts |
+| `/config/prompts` | PUT | Replace entire configuration (runtime only) |
+| `/config/prompts` | PATCH | Partially update configuration (runtime only) |
+| `/config/prompts` | DELETE | Reset to file-based defaults |
+| `/config/prompts/preview` | GET | Preview prompts with temporary config |
+
+> **Note:** API updates are runtime-only and don't persist to the config file. Edit `prompt_config.json` for permanent changes.
+
+---
+
 ## Project Structure
 
 ```
 leads-agent/
 ├── src/leads_agent/
-│   ├── api.py        # FastAPI webhook handler
+│   ├── api.py        # FastAPI webhook handler + config endpoints
 │   ├── cli.py        # Typer CLI (init, run, backtest, test, replay, etc.)
 │   ├── config.py     # Settings (pydantic-settings)
 │   ├── models.py     # HubSpotLead, LeadClassification, research models
+│   ├── prompts.py    # Prompt configuration and management
 │   ├── llm.py        # Classification + research agents
 │   ├── processor.py  # Shared processing pipeline
 │   ├── backtest.py   # Historical lead fetching
 │   └── slack.py      # Slack client & signature verification
+├── prompt_config.example.json  # Example prompt configuration
 ├── docs/ARCHITECTURE.md
 ├── slack-app-manifest.yml
 └── pyproject.toml

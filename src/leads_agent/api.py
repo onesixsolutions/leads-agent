@@ -3,12 +3,28 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from pydantic import BaseModel
 
 from .config import Settings, get_settings
 from .models import HubSpotLead
 from .processor import process_and_post
+from .prompts import ICPConfig, PromptConfig, get_prompt_manager
 from .slack import verify_slack_request
+
+
+class PromptConfigResponse(BaseModel):
+    """Response model for prompt configuration endpoints."""
+
+    config: PromptConfig
+    classification_prompt: str
+    research_prompt: str
+
+
+class PromptConfigUpdate(BaseModel):
+    """Request model for updating prompt configuration."""
+
+    config: PromptConfig
 
 
 def _is_hubspot_message(settings: Settings, event: dict[str, Any]) -> bool:
@@ -114,6 +130,132 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             print(f"  [SKIP] Not a HubSpot message (subtype={event.get('subtype')}, username={event.get('username')})")
 
         return {"ok": True}
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Prompt Configuration Endpoints
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @app.get("/config/prompts", response_model=PromptConfigResponse)
+    async def get_prompt_config():
+        """
+        Get the current prompt configuration.
+
+        Returns the configuration along with the fully-rendered prompts
+        that will be sent to the LLM.
+        """
+        manager = get_prompt_manager()
+        return PromptConfigResponse(
+            config=manager.config,
+            classification_prompt=manager.build_classification_prompt(),
+            research_prompt=manager.build_research_prompt(),
+        )
+
+    @app.put("/config/prompts", response_model=PromptConfigResponse)
+    async def update_prompt_config(update: PromptConfigUpdate):
+        """
+        Update the prompt configuration.
+
+        This updates the runtime configuration. Changes are not persisted
+        and will be lost on restart. To persist, save to prompt_config.json
+        or set PROMPT_CONFIG_JSON environment variable.
+        """
+        manager = get_prompt_manager()
+        manager.update_config(update.config)
+        return PromptConfigResponse(
+            config=manager.config,
+            classification_prompt=manager.build_classification_prompt(),
+            research_prompt=manager.build_research_prompt(),
+        )
+
+    @app.patch("/config/prompts", response_model=PromptConfigResponse)
+    async def patch_prompt_config(update: dict[str, Any]):
+        """
+        Partially update the prompt configuration.
+
+        Only the provided fields will be updated. Useful for updating
+        specific aspects without providing the entire configuration.
+        """
+        manager = get_prompt_manager()
+        current = manager.config.model_dump()
+
+        # Deep merge the update
+        def deep_merge(base: dict, updates: dict) -> dict:
+            result = base.copy()
+            for key, value in updates.items():
+                if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = deep_merge(result[key], value)
+                else:
+                    result[key] = value
+            return result
+
+        merged = deep_merge(current, update)
+
+        try:
+            new_config = PromptConfig.model_validate(merged)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid configuration: {e}")
+
+        manager.update_config(new_config)
+        return PromptConfigResponse(
+            config=manager.config,
+            classification_prompt=manager.build_classification_prompt(),
+            research_prompt=manager.build_research_prompt(),
+        )
+
+    @app.delete("/config/prompts")
+    async def reset_prompt_config():
+        """
+        Reset the prompt configuration to defaults.
+
+        Clears any runtime overrides and reloads from the base configuration
+        (environment variables or config file).
+        """
+        manager = get_prompt_manager()
+        manager.reset_config()
+        return {
+            "status": "reset",
+            "message": "Prompt configuration reset to defaults",
+        }
+
+    @app.get("/config/prompts/preview")
+    async def preview_prompt_config(
+        company_name: str | None = None,
+        services_description: str | None = None,
+        icp_description: str | None = None,
+        target_industries: str | None = None,
+        target_company_sizes: str | None = None,
+    ):
+        """
+        Preview prompts with temporary configuration.
+
+        Useful for testing configuration changes before applying them.
+        Does not modify the actual configuration.
+        """
+        # Build temporary config from query params
+        icp = None
+        if any([icp_description, target_industries, target_company_sizes]):
+            icp = ICPConfig(
+                description=icp_description,
+                target_industries=target_industries.split(",") if target_industries else None,
+                target_company_sizes=target_company_sizes.split(",") if target_company_sizes else None,
+            )
+
+        temp_config = PromptConfig(
+            company_name=company_name,
+            services_description=services_description,
+            icp=icp,
+        )
+
+        # Create temporary manager
+        from .prompts import PromptManager
+
+        temp_manager = PromptManager(temp_config)
+
+        return {
+            "config": temp_config.model_dump(exclude_none=True),
+            "classification_prompt": temp_manager.build_classification_prompt(),
+            "research_prompt": temp_manager.build_research_prompt(),
+        }
 
     return app
 
