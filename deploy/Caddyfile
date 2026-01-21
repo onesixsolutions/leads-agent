@@ -1,0 +1,11 @@
+# Replace with your real hostname (must resolve to the EC2 static IP)
+your-domain.example {
+  encode gzip
+
+  # Slack will POST here
+  reverse_proxy /slack/events leads-agent:8000
+
+  # Health checks
+  reverse_proxy / leads-agent:8000
+}
+
