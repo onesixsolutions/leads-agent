@@ -46,15 +46,16 @@ def init(
             raise typer.Abort()
 
     rprint("\n[bold]Slack Configuration[/]")
-    rprint("[dim]Create a Slack App at https://api.slack.com/apps[/]\n")
+    rprint("[dim]Create a Slack App at https://api.slack.com/apps[/]")
+    rprint("[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n")
 
     slack_bot_token = Prompt.ask(
-        "  [cyan]SLACK_BOT_TOKEN[/]",
+        "  [cyan]SLACK_BOT_TOKEN[/] [dim](xoxb-...)[/]",
         default="xoxb-...",
     )
-    slack_signing_secret = Prompt.ask(
-        "  [cyan]SLACK_SIGNING_SECRET[/]",
-        default="",
+    slack_app_token = Prompt.ask(
+        "  [cyan]SLACK_APP_TOKEN[/] [dim](xapp-... for Socket Mode)[/]",
+        default="xapp-...",
     )
     slack_channel_id = Prompt.ask(
         "  [cyan]SLACK_CHANNEL_ID[/]",
@@ -132,9 +133,9 @@ def init(
 
     # Build env content
     env_lines = [
-        "# Slack credentials",
+        "# Slack credentials (Socket Mode)",
         f"SLACK_BOT_TOKEN={slack_bot_token}",
-        f"SLACK_SIGNING_SECRET={slack_signing_secret}",
+        f"SLACK_APP_TOKEN={slack_app_token}",
         f"SLACK_CHANNEL_ID={slack_channel_id}",
     ]
     if slack_test_channel_id:
@@ -262,7 +263,7 @@ def config():
     table.add_column("Value")
 
     table.add_row("SLACK_BOT_TOKEN", _mask(settings.slack_bot_token))
-    table.add_row("SLACK_SIGNING_SECRET", _mask(settings.slack_signing_secret))
+    table.add_row("SLACK_APP_TOKEN", _mask(settings.slack_app_token))
     table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id or "[not set]")
     table.add_row("SLACK_TEST_CHANNEL_ID", settings.slack_test_channel_id or "[not set]")
     table.add_row("OPENAI_API_KEY", _mask(settings.openai_api_key))
@@ -370,23 +371,12 @@ def prompts(
 
 
 @app.command()
-def run(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host"),
-    port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
-    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
-):
-    """Start the FastAPI server to receive Slack events."""
-    import uvicorn
+def run():
+    """Start the Slack bot using Socket Mode."""
+    from leads_agent.bolt_app import run_socket_mode
 
-    rprint(Panel.fit("🚀 [bold green]Starting Leads Agent API[/]", border_style="green"))
-    rprint(f"[dim]Listening on http://{host}:{port}/slack/events[/]\n")
-
-    uvicorn.run(
-        "leads_agent.api:app",
-        host=host,
-        port=port,
-        reload=reload,
-    )
+    rprint(Panel.fit("🔌 [bold green]Starting Leads Agent (Socket Mode)[/]", border_style="green"))
+    run_socket_mode()
 
 
 @app.command()

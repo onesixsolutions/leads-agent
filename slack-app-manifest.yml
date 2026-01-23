@@ -6,15 +6,15 @@
 #   2. Click "Create New App" → "From an app manifest"
 #   3. Select your workspace
 #   4. Paste this YAML (or switch to JSON)
-#   5. Replace YOUR_DOMAIN with your actual server URL
-#   6. Review and create
+#   5. Review and create
 #
 # After creating:
-#   - Copy Bot Token from "OAuth & Permissions" → SLACK_BOT_TOKEN
-#   - Copy Signing Secret from "Basic Information" → SLACK_SIGNING_SECRET
+#   1. Copy Bot Token from "OAuth & Permissions" → SLACK_BOT_TOKEN
+#   2. Go to "Basic Information" > "App-Level Tokens"
+#   3. Generate token with scope "connections:write" → SLACK_APP_TOKEN
 #
 # IMPORTANT: The bot only receives messages from channels it's invited to.
-# After installing, invite the bot to your channel(s) with: /invite @Leads Classifier
+# After installing, invite the bot to your channel(s) with: /invite @Leads Agent
 
 display_information:
   name: Leads Agent
@@ -37,13 +37,11 @@ oauth_config:
 
 settings:
   event_subscriptions:
-    # ⚠️  IMPORTANT: Replace with your actual server URL
-    # For local dev, use ngrok: ngrok http 8000 or tailscale: tailscale funnel 8000
-    request_url: https://YOUR_DOMAIN/slack/events
+    # No request_url needed for Socket Mode - events are received via WebSocket
     bot_events:
       - message.channels    # Messages in public channels (bot must be invited)
       - message.groups      # Messages in private channels (bot must be invited)
 
   org_deploy_enabled: false
-  socket_mode_enabled: false
+  socket_mode_enabled: true   # Uses outbound WebSocket, no public URL needed
   token_rotation_enabled: false

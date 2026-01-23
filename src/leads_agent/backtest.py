@@ -10,7 +10,7 @@ from .slack import slack_client
 
 def fetch_hubspot_leads(settings: Settings, limit: int = 200) -> Iterable[tuple[dict, HubSpotLead]]:
     """Fetch historical HubSpot lead messages from Slack."""
-    settings.require_slack()
+    settings.require_slack_client()
     if settings.slack_channel_id is None:
         return []
 

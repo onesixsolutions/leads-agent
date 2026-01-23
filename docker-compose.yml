@@ -5,27 +5,4 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      # Prefer keeping the API private and front it with Caddy or Tailscale Funnel.
-      # Change to "8000:8000" if you intentionally want it reachable publicly (not recommended).
-      - "127.0.0.1:8000:8000"
-  # Optional: expose HTTPS on the instance's static IP/domain without needing Tailscale Funnel.
-  # Requires a DNS A record: your-domain.example -> your EC2 static IP.
-  #
-  # caddy:
-  #   image: caddy:2
-  #   container_name: caddy
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data
-  #     - caddy_config:/config
-  #   depends_on:
-  #     - primary
-
-  # volumes:
-  #   caddy_data:
-  #   caddy_config:
+    # No ports needed - Socket Mode uses outbound WebSocket connections
