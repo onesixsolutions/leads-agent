@@ -63,9 +63,9 @@ leads-agent init
 ### Environment Variables
 
 ```bash
-# Slack
-export SLACK_BOT_TOKEN="xoxb-..."
-export SLACK_SIGNING_SECRET="..."
+# Slack (Socket Mode)
+export SLACK_BOT_TOKEN="xoxb-..."           # Bot User OAuth Token
+export SLACK_APP_TOKEN="xapp-..."           # App-Level Token (connections:write)
 export SLACK_CHANNEL_ID="C..."              # Production channel
 export SLACK_TEST_CHANNEL_ID="C..."         # Optional: for test mode
 
@@ -92,15 +92,14 @@ leads-agent config
 1. Go to [api.slack.com/apps](https://api.slack.com/apps)
 2. Click **Create New App** → **From an app manifest**
 3. Paste [`slack-app-manifest.yml`](slack-app-manifest.yml)
-4. Replace `YOUR_DOMAIN` with your server URL
-5. Install to workspace
+4. Install to workspace
 
 **Get credentials:**
 
 | Credential | Location |
 |------------|----------|
 | `SLACK_BOT_TOKEN` | OAuth & Permissions → Bot User OAuth Token |
-| `SLACK_SIGNING_SECRET` | Basic Information → Signing Secret |
+| `SLACK_APP_TOKEN` | Basic Information → App-Level Tokens → Generate (scope: `connections:write`) |
 | `SLACK_CHANNEL_ID` | Right-click channel → View details → Copy ID |
 
 **Invite the bot:**
@@ -109,7 +108,7 @@ leads-agent config
 /invite @Leads Agent
 ```
 
-> The bot only receives messages from channels it's invited to.
+> The bot uses **Socket Mode** (outbound WebSocket) — no public URL or HTTPS setup required.
 
 ---
 
@@ -120,7 +119,7 @@ leads-agent init                    # Setup wizard (includes prompt config)
 leads-agent config                  # Show configuration
 leads-agent prompts                 # Show prompt configuration
 leads-agent prompts --full          # Show rendered prompts
-leads-agent run [--reload]          # Start API server
+leads-agent run                     # Start bot (Socket Mode)
 
 # Classification
 leads-agent classify "message"      # Triage; if promising, auto research + score
@@ -286,7 +285,7 @@ leads-agent/
 
 | Issue | Solution |
 |-------|----------|
-| "Invalid request" on Slack events | Check `SLACK_SIGNING_SECRET`; ensure server clock is synced |
+| "Missing SLACK_APP_TOKEN" | Generate App-Level Token with `connections:write` scope |
 | No classifications happening | Verify bot is invited to channel; check HubSpot is posting |
 | Backtest shows no leads | Run `pull-history --print` to verify HubSpot messages exist |
 | LLM errors | Check `OPENAI_API_KEY`; for Ollama ensure server is running |

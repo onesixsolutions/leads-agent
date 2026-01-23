@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================
-# Production Dockerfile for Leads Agent
+# Production Dockerfile for Leads Agent (Socket Mode)
 # ============================================================
 
 FROM python:3.11-slim
@@ -23,18 +23,16 @@ RUN uv pip install --system --no-cache . \
 # Switch to non-root user
 USER appuser
 
-# Environment defaults (override at runtime)
-# LOGFIRE_TOKEN should be set via .env file
+# Environment defaults (override at runtime via .env)
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000
+    PYTHONDONTWRITEBYTECODE=1
 
-# Expose the default port
-EXPOSE 8000
+# No EXPOSE needed - Socket Mode uses outbound WebSocket only
 
-# Health check (API has health endpoint at /)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/')" || exit 1
+# Health check - verify the process is running
+# (Socket Mode doesn't have an HTTP endpoint to check)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep -f "leads-agent" || exit 1
 
-# Run the API server
-CMD ["leads-agent", "run", "--host", "0.0.0.0", "--port", "8000"]
+# Run the bot in Socket Mode
+CMD ["leads-agent", "run"]

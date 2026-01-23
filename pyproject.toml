@@ -1,15 +1,14 @@
 [project]
 name = "leads-agent"
 version = "0.1.0"
-description = "Slack leads classifier (FastAPI + Slack Events + local/OpenAI-compatible LLM)."
+description = "Slack leads classifier using Socket Mode + local/OpenAI-compatible LLM."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Francisco González" }]
 
 dependencies = [
-  "fastapi>=0.110",
-  "uvicorn[standard]>=0.27",
+  "slack-bolt>=1.18",
   "slack_sdk>=3.27",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
@@ -17,7 +16,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "typer>=0.12",
   "rich>=13.7",
-  "logfire[fastapi]>=4.19.0",
+  "logfire>=4.19.0",
 ]
 
 [project.scripts]

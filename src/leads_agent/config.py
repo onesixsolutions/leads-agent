@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Slack
     slack_bot_token: SecretStr | None = Field(default=None, validation_alias="SLACK_BOT_TOKEN")
-    slack_signing_secret: SecretStr | None = Field(default=None, validation_alias="SLACK_SIGNING_SECRET")
+    slack_app_token: SecretStr | None = Field(default=None, validation_alias="SLACK_APP_TOKEN")
     slack_channel_id: str | None = Field(default=None, validation_alias="SLACK_CHANNEL_ID")
     slack_test_channel_id: str | None = Field(default=None, validation_alias="SLACK_TEST_CHANNEL_ID")
 
@@ -53,14 +53,22 @@ class Settings(BaseSettings):
     # Note: Prompt configuration is handled separately via PROMPT_CONFIG_PATH env var
     # or auto-discovered prompt_config.json file. See leads_agent.prompts module.
 
-    def require_slack(self) -> "Settings":
+    def require_slack_socket_mode(self) -> "Settings":
+        """Validate settings required for Socket Mode."""
         missing: list[str] = []
         if self.slack_bot_token is None:
             missing.append("SLACK_BOT_TOKEN")
-        if self.slack_signing_secret is None:
-            missing.append("SLACK_SIGNING_SECRET")
-        if self.slack_channel_id is None:
-            missing.append("SLACK_CHANNEL_ID")
+        if self.slack_app_token is None:
+            missing.append("SLACK_APP_TOKEN")
+        if missing:
+            raise ValueError(f"Missing required Slack config: {', '.join(missing)}")
+        return self
+
+    def require_slack_client(self) -> "Settings":
+        """Validate settings required for Slack API calls (backtest, test, etc.)."""
+        missing: list[str] = []
+        if self.slack_bot_token is None:
+            missing.append("SLACK_BOT_TOKEN")
         if missing:
             raise ValueError(f"Missing required Slack config: {', '.join(missing)}")
         return self

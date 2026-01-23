@@ -1,170 +1,96 @@
 # Deployment Guide
 
-Leads Agent is a small API that receives Slack webhooks at `POST /slack/events`. Slack requires a **public HTTPS URL**, which you can achieve via:
+Leads Agent uses **Socket Mode**, which connects to Slack via outbound WebSocket. This means:
 
-- **Local development**: Tailscale Funnel (no static IP needed)
-- **Production (EC2)**: Static IP + domain + Caddy for automatic HTTPS
-
-Both approaches use Docker Compose.
+- No public HTTPS endpoint needed
+- No domain or TLS certificates required
+- No inbound firewall rules to configure
+- Works anywhere with outbound internet access
 
 ---
 
 ## Prerequisites
 
-| Requirement | Local | EC2 |
-|-------------|:-----:|:---:|
-| Docker + Compose | ✓ | ✓ |
-| Slack App configured ([see README](../README.md#slack-app-setup)) | ✓ | ✓ |
-| Tailscale installed | ✓ | - |
-| Static IP + domain | - | ✓ |
-| Ports 80/443 open | - | ✓ |
+- Docker + Docker Compose
+- Slack App with Socket Mode enabled ([see setup](#slack-app-setup))
+- OpenAI API key (or compatible LLM endpoint)
 
 ---
 
-## Option A: Local Development (Tailscale Funnel)
-
-Use this when you want to run the bot from your local machine without exposing ports to the internet.
-
-### 1. Clone and configure
+## Quick Start
 
 ```bash
+# Clone the repo
 git clone <YOUR_REPO_URL> leads-agent
 cd leads-agent
 
-# Create .env with your secrets (see README for required vars)
+# Create .env from example
 cp .env.example .env
-# Edit .env with your credentials
-chmod 600 .env
-```
+# Edit .env with your credentials (see below)
 
-### 2. Start the service
-
-```bash
+# Start the bot
 docker compose up -d --build
-curl -f http://127.0.0.1:8000/  # Verify it's running
+
+# View logs
+docker compose logs -f primary
 ```
 
-### 3. Expose via Tailscale Funnel
-
-Tailscale Funnel creates a public HTTPS URL that proxies to your local service.
-
-```bash
-# Check your Tailscale version for exact syntax
-tailscale version
-tailscale funnel --help
-
-# Typical command (may vary by version)
-tailscale funnel 8000
-```
-
-This gives you a public URL like `https://your-machine.tailnet-name.ts.net/`.
-
-### 4. Configure Slack
-
-Set your Slack App's **Event Subscriptions → Request URL** to:
-
-```
-https://your-machine.tailnet-name.ts.net/slack/events
-```
-
-### Notes
-
-- Funnel must stay running for Slack to reach your bot
-- Your machine must be online and connected to Tailscale
-- Good for development and testing; for always-on production, use EC2
+That's it. The bot connects to Slack automatically.
 
 ---
 
-## Option B: EC2 Production (Static IP + Caddy)
+## Slack App Setup
 
-Use this for always-on production deployment with automatic HTTPS via Let's Encrypt.
+### 1. Create the App
 
-### 1. DNS setup
+1. Go to [api.slack.com/apps](https://api.slack.com/apps)
+2. Click **Create New App** → **From an app manifest**
+3. Select your workspace
+4. Paste the contents of [`slack-app-manifest.yml`](../slack-app-manifest.yml)
+5. Click **Create**
 
-Create a DNS **A record** pointing your domain to the EC2 static IP:
+### 2. Get Your Tokens
+
+| Token | Where to Find | Env Variable |
+|-------|---------------|--------------|
+| Bot Token | OAuth & Permissions → Bot User OAuth Token | `SLACK_BOT_TOKEN` |
+| App Token | Basic Information → App-Level Tokens → Generate | `SLACK_APP_TOKEN` |
+
+**For the App Token:** Click "Generate Token and Scopes", name it (e.g., "socket-mode"), add scope `connections:write`, then generate.
+
+### 3. Install to Workspace
+
+1. Go to **Install App** in the sidebar
+2. Click **Install to Workspace**
+3. Authorize the permissions
+
+### 4. Invite the Bot
+
+In Slack, invite the bot to your leads channel:
 
 ```
-leads.example.com → 1.2.3.4 (your EC2 Elastic IP)
+/invite @Leads Agent
 ```
 
-### 2. Security group
+---
 
-Ensure inbound rules allow:
+## Configuration
 
-- **TCP 80** (HTTP, for Let's Encrypt challenge)
-- **TCP 443** (HTTPS, for Slack webhooks)
-
-### 3. Clone and configure on EC2
+Edit `.env` with your values:
 
 ```bash
-sudo mkdir -p /opt/leads-agent
-sudo chown -R "$USER":"$USER" /opt/leads-agent
-cd /opt/leads-agent
+# Required
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+OPENAI_API_KEY=sk-your-openai-key
 
-git clone <YOUR_REPO_URL> .
-
-# Create .env with your secrets
-cp .env.example .env
-# Edit .env with your credentials
-chmod 600 .env
+# Optional
+SLACK_CHANNEL_ID=C0123456789  # Filter to specific channel
+DRY_RUN=true                   # Set to false to post replies
+LOGFIRE_TOKEN=                 # For observability
 ```
 
-### 4. Configure Caddy
-
-Edit `deploy/Caddyfile` and replace `your-domain.example` with your actual domain:
-
-```bash
-# deploy/Caddyfile
-leads.example.com {
-  encode gzip
-  reverse_proxy primary:8000
-}
-```
-
-### 5. Enable Caddy in docker-compose.yml
-
-Uncomment the Caddy service and volumes:
-
-```yaml
-services:
-  primary:
-    # ... existing config ...
-
-  caddy:
-    image: caddy:2
-    container_name: caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - primary
-
-volumes:
-  caddy_data:
-  caddy_config:
-```
-
-### 6. Deploy
-
-```bash
-docker compose up -d --build
-docker compose logs -f caddy  # Watch for successful cert acquisition
-```
-
-Caddy automatically obtains and renews Let's Encrypt certificates.
-
-### 7. Configure Slack
-
-Set your Slack App's **Event Subscriptions → Request URL** to:
-
-```
-https://leads.example.com/slack/events
-```
+See [`.env.example`](../.env.example) for all options.
 
 ---
 
@@ -173,24 +99,13 @@ https://leads.example.com/slack/events
 ### View logs
 
 ```bash
-docker compose logs -f primary  # Application logs
-docker compose logs -f caddy    # Caddy/HTTPS logs (if using)
-```
-
-### Update/deploy new version
-
-```bash
-cd /opt/leads-agent
-git pull
-docker compose up -d --build
 docker compose logs -f primary
 ```
 
-### Rollback
+### Update/deploy
 
 ```bash
-cd /opt/leads-agent
-git checkout <previous_sha>
+git pull
 docker compose up -d --build
 ```
 
@@ -200,27 +115,60 @@ docker compose up -d --build
 docker compose restart primary
 ```
 
+### Stop
+
+```bash
+docker compose down
+```
+
+---
+
+## Deployment Environments
+
+Socket Mode works identically everywhere:
+
+| Environment | Notes |
+|-------------|-------|
+| **Local machine** | Just run `docker compose up` |
+| **EC2 / VPS** | No security group changes needed for Slack |
+| **Behind NAT/firewall** | Works as long as outbound HTTPS is allowed |
+| **Kubernetes** | Deploy as a simple pod, no ingress needed |
+
+### EC2 Example
+
+```bash
+# SSH to your instance
+ssh ec2-user@your-instance
+
+# Clone and configure
+sudo mkdir -p /opt/leads-agent
+sudo chown -R "$USER" /opt/leads-agent
+cd /opt/leads-agent
+git clone <YOUR_REPO_URL> .
+
+# Configure
+cp .env.example .env
+nano .env  # Add your tokens
+
+# Run
+docker compose up -d --build
+docker compose logs -f primary
+```
+
 ---
 
 ## Logfire (Observability)
 
-Logfire provides tracing and observability for lead processing.
-
-### Get your token
+Optional but recommended for production monitoring.
 
 1. Go to [logfire.pydantic.dev](https://logfire.pydantic.dev/)
 2. Create or select a project
-3. Go to **Project Settings → Write Tokens → Create Write Token**
-
-### Configure
-
-Add to your `.env` file:
+3. **Project Settings → Write Tokens → Create Write Token**
+4. Add to `.env`:
 
 ```bash
-LOGFIRE_TOKEN=your-write-token-here
+LOGFIRE_TOKEN=your-write-token
 ```
-
-The token is passed to the container via docker-compose's `env_file` directive.
 
 ---
 
@@ -228,7 +176,21 @@ The token is passed to the container via docker-compose's `env_file` directive.
 
 | Issue | Solution |
 |-------|----------|
-| Caddy fails to get certificate | Verify DNS A record resolves; check ports 80/443 are open |
-| "Invalid request" from Slack | Check `SLACK_SIGNING_SECRET`; ensure server clock is synced (`timedatectl`) |
-| Container won't start | Check logs: `docker compose logs primary` |
-| Funnel not working | Verify Tailscale is connected: `tailscale status` |
+| "Missing SLACK_APP_TOKEN" | Generate App-Level Token with `connections:write` scope |
+| Bot not responding | Verify bot is invited to channel: `/invite @Leads Agent` |
+| "Connection failed" | Check outbound HTTPS (port 443) is allowed |
+| Container keeps restarting | Check logs: `docker compose logs primary` |
+
+### Verify Slack Connection
+
+Check logs for successful connection:
+
+```
+[STARTUP] Leads Agent (Socket Mode)
+  Channel filter: C0123456789
+  Dry run: true
+
+Listening for HubSpot messages...
+```
+
+If you see errors about tokens, double-check your `.env` values.

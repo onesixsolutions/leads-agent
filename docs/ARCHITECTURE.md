@@ -1,25 +1,24 @@
 # Architecture Guide
 
-How Leads Agent works — from lead submission to classification and enrichment.
+How Leads Agent works — from lead submission to classification, research, and scoring.
 
 ---
 
 ## Overview
 
-Leads Agent is a webhook service that:
-1. Listens for HubSpot lead notifications in Slack
+Leads Agent is a Slack bot that:
+1. Listens for HubSpot lead notifications via **Socket Mode** (WebSocket)
 2. Parses contact info from the message
-3. Classifies the lead using an LLM
-4. Optionally researches promising leads via web search
-5. Posts results as a threaded reply
+3. Runs a multi-stage LLM pipeline: **triage → research → scoring**
+4. Posts results as a threaded reply
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
 │   HubSpot   │────▶│    Slack    │────▶│ Leads Agent  │────▶│   OpenAI    │
-│  Workflow   │     │   Channel   │     │   (FastAPI)  │     │    LLM      │
+│  Workflow   │     │   Channel   │     │ (Socket Mode)│     │    LLM      │
 └─────────────┘     └─────────────┘     └──────────────┘     └─────────────┘
-     Form           Bot message         Filter & parse       Classify
-   submission       with lead data      HubSpot messages     + research
+     Form            Bot message          Filter & parse     Triage → Research
+   submission        with lead data       HubSpot messages   → Score → Post
 ```
 
 ---
@@ -28,11 +27,12 @@ Leads Agent is a webhook service that:
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| **API** | `api.py` | Receives Slack webhooks, filters HubSpot messages, dispatches to processor |
-| **Processor** | `processor.py` | Shared pipeline: classify → format → post (used by API, test, replay) |
+| **Bolt App** | `bolt_app.py` | Socket Mode connection, receives Slack events, filters HubSpot messages |
+| **Processor** | `processor.py` | Shared pipeline: classify → format → post (used by all modes) |
+| **Agent** | `agent.py` | Multi-stage LLM pipeline with pydantic-ai agents |
 | **Models** | `models.py` | `HubSpotLead`, `LeadClassification`, `EnrichedLeadClassification` |
-| **Classifier** | `llm.py` | Classification agent + research agent with DuckDuckGo search |
-| **Slack** | `slack.py` | Slack SDK wrapper, HMAC signature verification |
+| **Prompts** | `prompts.py` | Prompt configuration, ICP settings, customizable instructions |
+| **Slack** | `slack.py` | Slack WebClient wrapper for posting messages |
 | **Config** | `config.py` | Environment/`.env` settings via pydantic-settings |
 | **CLI** | `cli.py` | Commands: `init`, `run`, `backtest`, `test`, `replay`, `classify` |
 | **Backtest** | `backtest.py` | Fetches historical HubSpot leads from Slack |
@@ -52,77 +52,158 @@ Email: jane@acme.com
 Message: We need help with AWS migration...
 ```
 
-### 2. Slack → Leads Agent
+### 2. Slack → Leads Agent (Socket Mode)
 
-Slack sends an event to your webhook:
+The bot receives events via WebSocket (no public URL needed):
 
-```json
-{
-  "type": "event_callback",
-  "event": {
-    "type": "message",
-    "subtype": "bot_message",
-    "username": "HubSpot",
-    "attachments": [{
-      "fallback": "*First Name*: Jane\n*Last Name*: Smith\n*Email*: jane@acme.com..."
-    }]
-  }
-}
+```python
+# bolt_app.py handles incoming events
+@app.event("message")
+def handle_message(event, say, client):
+    if not _is_hubspot_message(settings, event):
+        return
+    lead = HubSpotLead.from_slack_event(event)
+    result = process_and_post(settings, lead, ...)
 ```
 
 **Filtering logic:**
 - Only `bot_message` subtype
 - Only `username: "HubSpot"`
 - Must have attachments
+- Not a thread reply
+- Matches `SLACK_CHANNEL_ID` (if configured)
 
-### 3. Classification
+### 3. Lead Parsing
 
-The lead is parsed into `HubSpotLead` and sent to the LLM:
+The `HubSpotLead` model parses Slack's attachment format:
+
+```python
+class HubSpotLead(BaseModel):
+    first_name: str | None
+    last_name: str | None
+    email: str | None
+    company: str | None
+    message: str | None
+    raw_text: str
+```
+
+Pattern matching extracts fields from HubSpot's `*Field*: Value` format.
+
+### 4. Multi-Stage Classification Pipeline
+
+The `agent.py` module implements a three-stage pipeline using pydantic-ai:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     CLASSIFICATION PIPELINE                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Lead Input                                                         │
+│       │                                                             │
+│       ▼                                                             │
+│  ┌─────────────┐                                                    │
+│  │   TRIAGE    │  Fast go/no-go decision                           │
+│  │   Agent     │  Output: LeadClassification                        │
+│  └──────┬──────┘                                                    │
+│         │                                                           │
+│         ▼                                                           │
+│    promising?  ─── No ──────────────────────────────┐              │
+│         │                                           │              │
+│        Yes                                          │              │
+│         │                                           │              │
+│         ▼                                           │              │
+│  ┌─────────────┐                                    │              │
+│  │  RESEARCH   │  Web search via DuckDuckGo        │              │
+│  │   Agent     │  Finds: company info, contact role │              │
+│  └──────┬──────┘                                    │              │
+│         │                                           │              │
+│         ▼                                           │              │
+│  ┌─────────────┐                                    │              │
+│  │  SCORING    │  1-5 score + recommended action   │              │
+│  │   Agent     │  Output: EnrichedLeadClassification│              │
+│  └──────┬──────┘                                    │              │
+│         │                                           │              │
+│         ▼                                           ▼              │
+│    Post threaded reply (if not DRY_RUN)                            │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Stage 1: Triage Agent
+
+Fast classification to filter obvious spam/noise:
 
 ```python
 class LeadClassification(BaseModel):
     first_name: str | None
     last_name: str | None
     email: str | None
-    company: str | None      # Extracted from message or email domain
-    label: LeadLabel         # ignore | promising
-    confidence: float        # 0.0–1.0
+    company: str | None          # Extracted from message or email domain
+    label: LeadLabel             # ignore | promising
+    confidence: float            # 0.0–1.0
     reason: str
+    lead_summary: str | None     # 1-2 sentence summary
+    key_signals: list[str] | None  # Tags like "budget mentioned", "student project"
 ```
 
-### 4. Web Search Enrichment (Optional)
+#### Stage 2: Research Agent (Promising Leads Only)
 
-For promising leads, a research agent performs web searches:
+Uses DuckDuckGo search to gather context:
+
+```python
+class CompanyResearch(BaseModel):
+    company_name: str
+    company_description: str
+    industry: str | None
+    company_size: str | None
+    website: str | None
+    relevance_notes: str | None
+
+class ContactResearch(BaseModel):
+    full_name: str
+    title: str | None
+    linkedin_summary: str | None
+    relevance_notes: str | None
+```
+
+**Research strategy:**
+1. Search email domain to find company website
+2. Search company name for description/industry
+3. Search contact name + company for role/title
+
+#### Stage 3: Scoring Agent (Promising Leads Only)
+
+Produces final score and recommended action:
 
 ```python
 class EnrichedLeadClassification(LeadClassification):
     company_research: CompanyResearch | None
     contact_research: ContactResearch | None
     research_summary: str | None
+    score: int | None              # 1-5 scale
+    action: LeadAction | None      # ignore | follow_up | prioritize
+    score_reason: str | None
 ```
-
-**Research strategy:**
-1. Search email domain to find company website
-2. Broader company search for description/industry
-3. Search contact name + company for role
-
-Uses pydantic-ai's `duckduckgo_search_tool()` with configurable `max_searches` limit.
 
 ### 5. Response
 
 If `DRY_RUN=false`, posts a threaded reply:
 
 ```
-🟢 *PROMISING* (92%)
+✅ *GO* (92%)
 _Genuine infrastructure consulting inquiry_
 
+⭐ *Score:* 4/5 · *Action:* follow_up
+_Strong ICP fit, decision-maker, clear budget timeline_
+
 📊 Company Research:
-• Acme Corp: Enterprise software for supply chain management
+• *Acme Corp*: Enterprise software for supply chain management
 • Industry: SaaS / Logistics
 • Website: acme.com
 
 👤 Contact Research:
-• Jane Smith - VP of Engineering
+• *Jane Smith* - VP of Engineering
+• Leads 50-person engineering team, reports to CTO
 ```
 
 ---
@@ -131,7 +212,7 @@ _Genuine infrastructure consulting inquiry_
 
 | Mode | Command | Source | Output | Thread? |
 |------|---------|--------|--------|---------|
-| **Production** | `run` | Slack webhook | Production channel | Yes |
+| **Production** | `run` | Socket Mode events | Production channel | Yes |
 | **Backtest** | `backtest` | Historical leads | Console only | — |
 | **Test** | `test` | Historical leads | Test channel | No |
 | **Replay** | `replay` | Historical leads | Production channel | Yes |
@@ -144,7 +225,7 @@ All modes share the same processing pipeline (`processor.py`).
 leads-agent run
 ```
 
-Receives live webhooks from Slack. When HubSpot posts a lead, classifies it and posts a thread reply.
+Connects via Socket Mode. When HubSpot posts a lead, runs the full pipeline and posts a thread reply.
 
 ### Backtest Mode
 
@@ -170,10 +251,63 @@ leads-agent replay --limit 5 --live
 
 Posts results as **thread replies on original messages** in production. Use to backfill classifications on historical leads.
 
-Features:
-- Skips leads that already have replies (configurable)
-- Confirmation prompt before posting
-- Respects `DRY_RUN` config
+---
+
+## Prompt Configuration
+
+The `prompts.py` module provides customizable prompts without code changes.
+
+### Configuration Sources
+
+1. **`prompt_config.json`** in current directory (auto-discovered)
+2. **`PROMPT_CONFIG_PATH`** environment variable
+3. **Runtime updates** via `PromptManager.update_config()`
+
+### Customizable Settings
+
+```python
+class PromptConfig(BaseModel):
+    company_name: str | None              # Your company name
+    services_description: str | None       # What you offer
+    icp: ICPConfig | None                  # Ideal Client Profile
+    qualifying_questions: list[str] | None # Custom evaluation criteria
+    custom_instructions: str | None        # Additional prompt instructions
+    research_focus_areas: list[str] | None # What to look for in research
+
+class ICPConfig(BaseModel):
+    description: str | None               # "Mid-market B2B SaaS"
+    target_industries: list[str] | None   # ["SaaS", "FinTech"]
+    target_company_sizes: list[str] | None # ["SMB", "Mid-Market"]
+    target_roles: list[str] | None        # ["CTO", "VP Engineering"]
+    geographic_focus: list[str] | None    # ["US", "Europe"]
+    disqualifying_signals: list[str] | None # ["student", "job seeker"]
+```
+
+### Example Configuration
+
+```json
+{
+  "company_name": "Acme Consulting",
+  "services_description": "AI/ML consulting and custom software development",
+  "icp": {
+    "description": "Mid-market B2B SaaS companies",
+    "target_industries": ["SaaS", "FinTech", "HealthTech"],
+    "target_company_sizes": ["SMB", "Mid-Market"]
+  },
+  "qualifying_questions": [
+    "Does this look like a real business need?",
+    "Is there budget indication or enterprise context?"
+  ]
+}
+```
+
+### View Configuration
+
+```bash
+leads-agent prompts           # Show configuration summary
+leads-agent prompts --full    # Show full rendered prompts
+leads-agent prompts --json    # Output as JSON
+```
 
 ---
 
@@ -189,6 +323,13 @@ Features:
 | `groups:read` | View private channel info |
 | `chat:write` | Post replies |
 
+### Required Tokens
+
+| Token | Purpose | Prefix |
+|-------|---------|--------|
+| `SLACK_BOT_TOKEN` | API calls (read history, post messages) | `xoxb-` |
+| `SLACK_APP_TOKEN` | Socket Mode WebSocket connection | `xapp-` |
+
 ### Event Subscriptions
 
 - `message.channels` — Public channel messages
@@ -198,123 +339,88 @@ Features:
 
 ---
 
-## Classification System
+## Observability
 
-### Labels
+### Logfire Integration
 
-| Label | Definition |
-|-------|------------|
-| 🟢 **promising** | Genuine service inquiry |
-| 🚫 **ignore** | Not worth pursuing (spam/scam, student projects, vendor pitches, etc.) |
+All agent traces are instrumented with Logfire:
 
-### System Prompt
+```python
+logfire.configure()
+logfire.instrument_pydantic_ai()
 
-```
-You classify inbound leads from a consulting company contact form.
-
-Classification labels:
-- ignore: not worth pursuing (spam/scam, student projects, resumes, vendor pitches, etc.)
-- promising: potentially real business intent worth investigating
-
-Rules:
-- Be conservative — if unclear, choose ignore
-- Extract the company name from the message or email domain if not provided
+with logfire.span("lead.process", lead_id=..., email=...):
+    # Triage, research, scoring spans are nested here
 ```
 
-### Research Prompt
-
+**Span hierarchy:**
 ```
-You are researching a promising sales lead.
-
-You have access to DuckDuckGo search tool. Use it to research:
-1. The COMPANY - search for the company website/domain first
-2. The CONTACT PERSON - search for their name + company
-
-Extract:
-- What does the company do?
-- What industry are they in?
-- What is the contact's role/title?
-
-Be efficient - limit your searches. Do NOT make up information.
+lead.process
+├── lead.classify
+│   ├── triage agent call
+│   ├── research agent call (if promising)
+│   └── scoring agent call (if promising)
+└── lead.post
 ```
+
+### Key Attributes
+
+- `lead_id` — Slack thread_ts or hash of lead data
+- `email` / `email_domain` — Contact info
+- `company` — Extracted company name
+- `label` — Classification result
+- `score` — Final 1-5 score (if promising)
 
 ---
 
 ## Deployment
 
-### Local Development
+### Socket Mode
+
+The bot uses Socket Mode (outbound WebSocket), so no public URL or HTTPS setup is required. Just configure tokens and run:
 
 ```bash
-# Terminal 1
-leads-agent run --reload
-
-# Terminal 2 (expose to internet)
-ngrok http 8000
-# or
-tailscale funnel 8000
+docker compose up -d --build
 ```
 
-### Production
+### Environment Variables
 
 ```bash
-# Environment
+# Required
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_SIGNING_SECRET=...
-SLACK_CHANNEL_ID=C...
+SLACK_APP_TOKEN=xapp-...
 OPENAI_API_KEY=sk-...
-DRY_RUN=false
 
-# Run
-leads-agent run --host 0.0.0.0 --port 8000
-```
-
-**Docker:**
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY . .
-RUN pip install uv && uv pip install --system -e .
-CMD ["leads-agent", "run", "--host", "0.0.0.0"]
+# Optional
+SLACK_CHANNEL_ID=C...      # Filter to specific channel
+DRY_RUN=true               # Don't post replies
+LOGFIRE_TOKEN=...          # Observability
 ```
 
 ### Security Checklist
 
-- [ ] Signing secret configured and verified
+- [ ] App token has only `connections:write` scope
 - [ ] Bot token not exposed in logs
-- [ ] HTTPS enforced
-- [ ] DRY_RUN tested before enabling
+- [ ] DRY_RUN tested before going live
+- [ ] Logfire configured for production monitoring
 
 ---
 
-## Flow Summary
+## Module Dependency Graph
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           LEADS AGENT FLOW                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  HubSpot → Slack Channel → POST /slack/events → LLM Classification      │
-│                                                    │                    │
-│                                                    ▼                    │
-│                                         ┌─────────────────────┐         │
-│                                         │  promising lead?    │         │
-│                                         └─────────────────────┘         │
-│                                            │              │             │
-│                                           Yes            No             │
-│                                            │              │             │
-│                                            ▼              │             │
-│                                    Web Search Research    │             │
-│                                    (auto for promising)   │             │
-│                                            │              │             │
-│                                            ▼              ▼             │
-│                                     Post threaded reply                 │
-│                                     (if not DRY_RUN)                    │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│  CLI MODES:                                                             │
-│    backtest  → Console only (no Slack posts)                            │
-│    test      → Post to SLACK_TEST_CHANNEL_ID (not threaded)             │
-│    replay    → Post as thread replies on original messages              │
-└─────────────────────────────────────────────────────────────────────────┘
+cli.py
+  ├── bolt_app.py ──────┐
+  ├── backtest.py ──────┼──▶ processor.py ──▶ agent.py ──▶ prompts.py
+  │                     │         │               │
+  │                     │         ▼               ▼
+  │                     │    slack.py        models.py
+  │                     │
+  └── config.py ◀───────┘
 ```
+
+**Key flows:**
+- `run` → `bolt_app.py` → `processor.py` → `agent.py`
+- `backtest` → `backtest.py` → `agent.py` (console only)
+- `test/replay` → `backtest.py` → `processor.py` → `agent.py`
+- `classify` → `agent.py` (direct, single message)
