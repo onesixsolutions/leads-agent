@@ -34,7 +34,7 @@ Leads Agent is a Slack bot that:
 | **Prompts** | `prompts.py` | Prompt configuration, ICP settings, customizable instructions |
 | **Slack** | `slack.py` | Slack WebClient wrapper for posting messages |
 | **Config** | `config.py` | Environment/`.env` settings via pydantic-settings |
-| **CLI** | `cli.py` | Commands: `init`, `run`, `backtest`, `test`, `replay`, `classify` |
+| **CLI** | `cli.py` | Commands: `init`, `run`, `collect`, `backtest`, `test`, `classify` |
 | **Backtest** | `backtest.py` | Fetches historical HubSpot leads from Slack |
 
 ---
@@ -210,14 +210,12 @@ _Strong ICP fit, decision-maker, clear budget timeline_
 
 ## Run Modes
 
-| Mode | Command | Source | Output | Thread? |
-|------|---------|--------|--------|---------|
-| **Production** | `run` | Socket Mode events | Production channel | Yes |
-| **Backtest** | `backtest` | Historical leads | Console only | — |
-| **Test** | `test` | Historical leads | Test channel | No |
-| **Replay** | `replay` | Historical leads | Production channel | Yes |
-
-All modes share the same processing pipeline (`processor.py`).
+| Mode | Command | Source | Output |
+|------|---------|--------|--------|
+| **Production** | `run` | Socket Mode (live) | Thread replies |
+| **Test** | `test` | Socket Mode (live) | Test channel |
+| **Backtest** | `backtest <file>` | Collected events JSON | Console only |
+| **Collect** | `collect` | Socket Mode (live) | JSON file |
 
 ### Production Mode
 
@@ -227,29 +225,29 @@ leads-agent run
 
 Connects via Socket Mode. When HubSpot posts a lead, runs the full pipeline and posts a thread reply.
 
-### Backtest Mode
-
-```bash
-leads-agent backtest --limit 20 --debug
-```
-
-Console-only testing. No Slack posts. Good for validating classifier behavior.
-
 ### Test Mode
 
 ```bash
-leads-agent test --limit 5
+leads-agent test
 ```
 
-Posts results to `SLACK_TEST_CHANNEL_ID` (not as threads). Safe for testing Slack output format.
+Connects via Socket Mode like production, but posts results to `SLACK_TEST_CHANNEL_ID` instead of thread replies. Good for testing the full pipeline safely.
 
-### Replay Mode
+### Collect Mode
 
 ```bash
-leads-agent replay --limit 5 --live
+leads-agent collect --keep 20
 ```
 
-Posts results as **thread replies on original messages** in production. Use to backfill classifications on historical leads.
+Captures raw Socket Mode events to a JSON file. Useful for inspecting event format and building test fixtures.
+
+### Backtest Mode
+
+```bash
+leads-agent backtest collected_events.json --debug
+```
+
+Runs classifier on events from a JSON file (created by `collect`). Console-only, no Slack posts. Good for offline testing and validation.
 
 ---
 
@@ -422,5 +420,6 @@ cli.py
 **Key flows:**
 - `run` → `bolt_app.py` → `processor.py` → `agent.py`
 - `backtest` → `backtest.py` → `agent.py` (console only)
-- `test/replay` → `backtest.py` → `processor.py` → `agent.py`
+- `test` → `bolt_app.py` (test mode) → `processor.py` → `agent.py`
+- `backtest` → `backtest.py` → `agent.py` (console only)
 - `classify` → `agent.py` (direct, single message)
