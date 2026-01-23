@@ -380,13 +380,36 @@ def run():
 
 
 @app.command()
+def collect(
+    keep: int = typer.Option(20, "--keep", "-n", help="Number of events to collect"),
+    output: str = typer.Option("collected_events.json", "--output", "-o", help="Output JSON file"),
+):
+    """
+    Collect raw Socket Mode events for debugging.
+
+    Saves raw event payloads exactly as received from Slack.
+    Useful for inspecting event format and structure.
+    """
+    from leads_agent.bolt_app import collect_events
+
+    rprint(Panel.fit("📡 [bold blue]Collecting Raw Socket Mode Events[/]", border_style="blue"))
+    collect_events(keep=keep, output_file=output)
+
+
+@app.command()
 def backtest(
-    limit: int = typer.Option(50, "--limit", "-n", help="Number of messages to fetch"),
+    events_file: Path = typer.Argument(..., help="JSON file with collected events (from `collect` command)"),
+    limit: int = typer.Option(None, "--limit", "-n", help="Max number of leads to process"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Show agent steps and token usage"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full message history (with --debug)"),
 ):
-    """Run classifier on historical HubSpot leads for testing."""
+    """
+    Run classifier on collected events (console output only).
+
+    First collect events with: leads-agent collect --keep 20
+    Then backtest with: leads-agent backtest collected_events.json
+    """
     from leads_agent.backtest import run_backtest
 
     modes = []
@@ -395,26 +418,25 @@ def backtest(
     mode_str = f" [dim]({', '.join(modes)})[/]" if modes else ""
     title = f"🔬 [bold magenta]Backtesting Lead Classifier[/]{mode_str}"
     rprint(Panel.fit(title, border_style="magenta"))
-    run_backtest(limit=limit, max_searches=max_searches, debug=debug, verbose=verbose)
+    rprint(f"[dim]Events file: {events_file}[/]\n")
+    run_backtest(events_file=events_file, limit=limit, max_searches=max_searches, debug=debug, verbose=verbose)
 
 
 @app.command()
 def test(
-    limit: int = typer.Option(5, "--limit", "-n", help="Number of leads to process"),
-    max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
-    test_channel: str = typer.Option(None, "--channel", "-c", help="Test channel ID"),
+    test_channel: str = typer.Option(None, "--channel", "-c", help="Test channel ID to post to"),
     dry_run: bool = typer.Option(None, "--dry-run/--live", help="Override DRY_RUN config setting"),
+    max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
 ):
     """
-    Test mode: process historical leads and post results to a test channel.
+    Test mode: listen via Socket Mode, post results to test channel.
 
-    Pulls HubSpot leads from SLACK_CHANNEL_ID, processes them,
-    and posts results to SLACK_TEST_CHANNEL_ID (not as threads).
+    Like production mode, but posts to SLACK_TEST_CHANNEL_ID instead of
+    replying in threads. Useful for testing the full pipeline.
 
     Respects DRY_RUN config setting. Use --dry-run or --live to override.
     """
-    from leads_agent.backtest import fetch_hubspot_leads
-    from leads_agent.processor import process_and_post
+    from leads_agent.bolt_app import run_test_mode
 
     settings = get_settings()
 
@@ -429,122 +451,11 @@ def test(
         rprint("[dim]Set SLACK_TEST_CHANNEL_ID in .env or use --channel[/]")
         raise typer.Exit(1)
 
-    rprint(Panel.fit("🧪 [bold cyan]Test Mode[/]", border_style="cyan"))
-    rprint(f"[dim]Source: {settings.slack_channel_id} → Target: {target_channel}[/]")
-    rprint(f"[dim]Limit: {limit} | Dry run: {settings.dry_run}[/]\n")
+    rprint(Panel.fit("🧪 [bold cyan]Test Mode (Socket Mode)[/]", border_style="cyan"))
+    rprint(f"[dim]Listening for HubSpot messages → Posting to {target_channel}[/]")
+    rprint(f"[dim]Dry run: {settings.dry_run}[/]\n")
 
-    count = 0
-    for msg, lead in fetch_hubspot_leads(settings, limit=limit):
-        count += 1
-        rprint(f"[cyan][{count}][/] Processing: {lead.first_name} {lead.last_name} <{lead.email}>")
-
-        result = process_and_post(
-            settings,
-            lead,
-            channel_id=target_channel,
-            thread_ts=None,  # Post to main channel, not as thread
-            max_searches=max_searches,
-            include_lead_info=True,  # Include lead details in test posts
-        )
-
-        label_emoji = {"ignore": "🚫", "promising": "✅"}.get(result.label, "❓")
-        rprint(f"    {label_emoji} {result.label.upper()} ({result.classification.confidence:.0%})")
-
-        if settings.dry_run:
-            rprint("    [dim](dry run - not posted)[/]")
-        else:
-            rprint(f"    [green]Posted to {target_channel}[/]")
-
-    if count == 0:
-        rprint("[yellow]No HubSpot leads found in channel history.[/]")
-    else:
-        rprint(f"\n[green]Processed {count} leads.[/]")
-
-
-@app.command()
-def replay(
-    limit: int = typer.Option(5, "--limit", "-n", help="Number of leads to process"),
-    max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
-    dry_run: bool = typer.Option(None, "--dry-run/--live", help="Override DRY_RUN config setting"),
-    skip_replied: bool = typer.Option(True, "--skip-replied/--no-skip-replied", help="Skip already-replied leads"),
-):
-    """
-    Replay mode: process historical leads and post as thread replies.
-
-    Like production mode, but manually triggered on historical messages.
-    Posts classification results as thread replies on the ORIGINAL messages
-    in SLACK_CHANNEL_ID.
-
-    Respects DRY_RUN config setting. Use --dry-run or --live to override.
-    """
-    from leads_agent.backtest import fetch_hubspot_leads
-    from leads_agent.processor import process_and_post
-    from leads_agent.slack import slack_client
-
-    settings = get_settings()
-
-    # Override dry_run if explicitly set
-    if dry_run is not None:
-        settings.dry_run = dry_run
-
-    rprint(Panel.fit("🔄 [bold yellow]Replay Mode[/]", border_style="yellow"))
-    rprint(f"[dim]Channel: {settings.slack_channel_id}[/]")
-    rprint(f"[dim]Limit: {limit} | Dry run: {settings.dry_run} | Skip replied: {skip_replied}[/]\n")
-
-    if not settings.dry_run:
-        if not Confirm.ask("[yellow]This will post replies to the production channel. Continue?[/]"):
-            raise typer.Abort()
-
-    client = slack_client(settings) if skip_replied else None
-
-    count = 0
-    skipped = 0
-    for msg, lead in fetch_hubspot_leads(settings, limit=limit * 2 if skip_replied else limit):
-        # Check if message already has replies
-        if skip_replied and client:
-            try:
-                replies = client.conversations_replies(
-                    channel=settings.slack_channel_id,
-                    ts=msg["ts"],
-                    limit=2,  # Just need to know if there are any replies
-                )
-                reply_count = len(replies.get("messages", [])) - 1  # Subtract the parent message
-                if reply_count > 0:
-                    skipped += 1
-                    continue
-            except Exception:
-                pass  # If we can't check, process anyway
-
-        if count >= limit:
-            break
-
-        count += 1
-        rprint(f"[cyan][{count}][/] Processing: {lead.first_name} {lead.last_name} <{lead.email}>")
-        rprint(f"    [dim]Message ts: {msg['ts']}[/]")
-
-        result = process_and_post(
-            settings,
-            lead,
-            channel_id=settings.slack_channel_id,
-            thread_ts=msg["ts"],  # Reply to original message
-            max_searches=max_searches,
-            include_lead_info=False,  # Don't include lead info, it's in the parent message
-        )
-
-        label_emoji = {"ignore": "🚫", "promising": "✅"}.get(result.label, "❓")
-        rprint(f"    {label_emoji} {result.label.upper()} ({result.classification.confidence:.0%})")
-
-        if settings.dry_run:
-            rprint("    [dim](dry run - not posted)[/]")
-        else:
-            rprint("    [green]Posted as thread reply[/]")
-
-    if count == 0 and skipped == 0:
-        rprint("[yellow]No HubSpot leads found in channel history.[/]")
-    else:
-        rprint(f"\n[green]Processed {count} leads.[/]")
-        if skipped > 0:
-            rprint(f"[dim]Skipped {skipped} leads that already had replies.[/]")
+    run_test_mode(settings=settings, test_channel=target_channel, max_searches=max_searches)
 
 
 @app.command("pull-history")

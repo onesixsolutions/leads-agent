@@ -1,57 +1,104 @@
+"""
+Backtest module - run classifier on collected events from a JSON file.
+
+Usage:
+    1. Collect events: leads-agent collect --keep 20
+    2. Run backtest: leads-agent backtest collected_events.json
+"""
+
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from pathlib import Path
 
-from .config import Settings, get_settings
 from .agent import ClassificationResult, classify_lead
+from .config import Settings, get_settings
 from .models import EnrichedLeadClassification, HubSpotLead
-from .slack import slack_client
 
 
-def fetch_hubspot_leads(settings: Settings, limit: int = 200) -> Iterable[tuple[dict, HubSpotLead]]:
-    """Fetch historical HubSpot lead messages from Slack."""
-    settings.require_slack_client()
-    if settings.slack_channel_id is None:
-        return []
+def load_events_from_file(file_path: str | Path) -> list[dict]:
+    """Load raw events from a JSON file created by `collect`."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Events file not found: {path}")
+    
+    with open(path) as f:
+        data = json.load(f)
+    
+    if not isinstance(data, list):
+        raise ValueError(f"Expected JSON array, got {type(data).__name__}")
+    
+    return data
 
-    client = slack_client(settings)
-    resp = client.conversations_history(channel=settings.slack_channel_id, limit=limit)
 
-    for msg in resp.get("messages", []):
-        # Only process HubSpot bot messages
-        if msg.get("subtype") != "bot_message":
+def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpotLead]]:
+    """
+    Extract HubSpot leads from collected events.
+    
+    Handles both raw Socket Mode payloads and webhook-style events.
+    """
+    for payload in events:
+        # Socket Mode payload has event nested under "event" key
+        event = payload.get("event", payload)
+        
+        # Skip non-message events
+        if event.get("type") != "message":
             continue
-        if msg.get("username", "").lower() != "hubspot":
+        
+        # Only process HubSpot bot messages
+        if event.get("subtype") != "bot_message":
+            continue
+        if event.get("username", "").lower() != "hubspot":
             continue
         # Skip thread replies
-        if msg.get("thread_ts") and msg.get("thread_ts") != msg.get("ts"):
+        if event.get("thread_ts") and event.get("thread_ts") != event.get("ts"):
             continue
 
         # Parse the lead
-        lead = HubSpotLead.from_slack_event(msg)
+        lead = HubSpotLead.from_slack_event(event)
         if lead:
-            yield msg, lead
+            yield event, lead
 
 
 def run_backtest(
+    events_file: str | Path,
     settings: Settings | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     max_searches: int = 4,
     debug: bool = False,
     verbose: bool = False,
 ) -> None:
-    """Run classification on historical HubSpot leads."""
+    """
+    Run classification on leads from a collected events file.
+    
+    Args:
+        events_file: Path to JSON file created by `leads-agent collect`
+        settings: Application settings
+        limit: Max number of leads to process (None = all)
+        max_searches: Max web searches per lead
+        debug: Show debug output
+        verbose: Show full message history (with debug)
+    """
     if settings is None:
         settings = get_settings()
+
+    # Load events from file
+    events = load_events_from_file(events_file)
+    print(f"Loaded {len(events)} events from {events_file}\n")
 
     modes = []
     if debug:
         modes.append("debug")
     mode_str = f" ({', '.join(modes)})" if modes else ""
-    print(f"Backtesting last {limit} HubSpot leads{mode_str}\n")
+    limit_str = f" (limit: {limit})" if limit else ""
+    print(f"Backtesting HubSpot leads{mode_str}{limit_str}\n")
 
     count = 0
-    for msg, lead in fetch_hubspot_leads(settings, limit=limit):
+    for event, lead in extract_leads_from_events(events):
+        if limit and count >= limit:
+            break
+            
         count += 1
         print("=" * 60)
         print(f"[{count}] Processing lead...")
@@ -78,7 +125,7 @@ def run_backtest(
                     print(result.format_history(verbose=True))
                 else:
                     # Show condensed history - just tool calls
-                    for i, msg in enumerate(result.message_history):
+                    for msg in result.message_history:
                         if hasattr(msg, "parts"):
                             for part in msg.parts:
                                 if hasattr(part, "tool_name"):
@@ -143,7 +190,7 @@ def run_backtest(
 
     print("=" * 60)
     if count == 0:
-        print("No HubSpot leads found in channel history.")
-        print("Make sure the bot is invited to the channel and HubSpot is posting there.")
+        print("No HubSpot leads found in events file.")
+        print("Make sure the file contains HubSpot bot messages.")
     else:
         print(f"\nProcessed {count} leads.")

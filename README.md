@@ -17,24 +17,6 @@ When HubSpot posts a lead to your Slack channel, Leads Agent:
 3. If **promising**, researches the company/contact and produces a **1–5 score** + recommended action
 4. Posts a threaded reply with the decision and context
 
-## Tracing (Logfire)
-
-Lead processing is wrapped in a single Logfire span (`lead.process`) so the triage/research/scoring agent traces are grouped under one lead.
-In Slack-driven flows, the span uses the Slack `thread_ts` as the `lead_id` for easy correlation.
-
-## Classification & Scoring
-
-- **Triage decision**: `promising` or `ignore`
-- **If promising**: enrich via web search + score 1–5 with context and recommended action
-
-## Features
-
-- **HubSpot-specific parsing** — Extracts first name, last name, email, company from HubSpot message format
-- **Smart triage** — Infers company from email domain when not provided
-- **Research + scoring** — For promising leads, researches context (company/contact) and outputs a 1–5 score
-- **Threaded replies** — Keeps channels clean by replying in threads
-- **Multiple run modes** — Backtest, test channel, replay to production
-
 ---
 
 ## Quick Start
@@ -124,10 +106,10 @@ leads-agent run                     # Start bot (Socket Mode)
 # Classification
 leads-agent classify "message"      # Triage; if promising, auto research + score
 
-# Testing & Validation
-leads-agent backtest --limit 20     # Console-only testing
-leads-agent test --limit 5          # Post to test channel
-leads-agent replay --limit 5        # Post as thread replies to production
+# Event Collection & Testing
+leads-agent collect --keep 20       # Collect raw Socket Mode events
+leads-agent backtest events.json    # Test classifier on collected events
+leads-agent test                    # Listen via Socket Mode, post to test channel
 
 # Debugging
 leads-agent pull-history --limit 10 --print
@@ -137,17 +119,22 @@ leads-agent pull-history --limit 10 --print
 
 | Command | Description | Output |
 |---------|-------------|--------|
-| `backtest` | Test classifier, console output only | Console |
-| `test` | Process leads, post to test channel | Test channel (main) |
-| `replay` | Process leads, post as thread replies | Production (threads) |
+| `run` | Production mode - reply in threads | Production (threads) |
+| `test` | Test mode - post to test channel | Test channel (main) |
+| `backtest` | Offline testing from collected events | Console only |
 
-All commands respect the `DRY_RUN` config setting. Override with `--dry-run` or `--live`.
+### Workflow
+
+1. **Collect events**: `leads-agent collect --keep 20` captures raw Socket Mode events
+2. **Backtest offline**: `leads-agent backtest collected_events.json` tests classifier
+3. **Test live**: `leads-agent test` listens for real events, posts to test channel
+4. **Go live**: `leads-agent run` production mode with thread replies
 
 ### Common Options
 
 | Option | Description |
 |--------|-------------|
-| `--limit`, `-n` | Number of leads to process |
+| `--limit`, `-n` | Number of leads/events to process |
 | `--max-searches` | Limit web searches per lead (default: 4) |
 | `--dry-run` / `--live` | Override DRY_RUN config |
 | `--debug`, `-d` | Show agent steps and token usage |
@@ -156,14 +143,17 @@ All commands respect the `DRY_RUN` config setting. Override with `--dry-run` or 
 ### Examples
 
 ```bash
-# Backtest with debug output
-leads-agent backtest --limit 10 --debug
+# Collect events for testing
+leads-agent collect --keep 10 --output hubspot_events.json
 
-# Test on separate channel (safe)
-leads-agent test --limit 5
+# Backtest on collected events
+leads-agent backtest hubspot_events.json --debug
 
-# Replay to production (posts thread replies)
-leads-agent replay --limit 5 --live
+# Test mode - live events to test channel
+leads-agent test --channel C0TEST123
+
+# Production mode (thread replies)
+leads-agent run
 ```
 
 ---
@@ -265,7 +255,7 @@ leads-agent prompts --json    # Output as JSON
 leads-agent/
 ├── src/leads_agent/
 │   ├── api.py        # FastAPI webhook handler + config endpoints
-│   ├── cli.py        # Typer CLI (init, run, backtest, test, replay, etc.)
+│   ├── cli.py        # Typer CLI (init, run, collect, backtest, test, etc.)
 │   ├── config.py     # Settings (pydantic-settings)
 │   ├── models.py     # HubSpotLead, LeadClassification, research models
 │   ├── prompts.py    # Prompt configuration and management
@@ -289,6 +279,13 @@ leads-agent/
 | No classifications happening | Verify bot is invited to channel; check HubSpot is posting |
 | Backtest shows no leads | Run `pull-history --print` to verify HubSpot messages exist |
 | LLM errors | Check `OPENAI_API_KEY`; for Ollama ensure server is running |
+
+---
+
+## Tracing (Logfire)
+
+Lead processing is wrapped in a single Logfire span (`lead.process`) so the triage/research/scoring agent traces are grouped under one lead.
+In Slack-driven flows, the span uses the Slack `thread_ts` as the `lead_id` for easy correlation.
 
 ---
 
