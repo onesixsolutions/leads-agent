@@ -80,6 +80,7 @@ def init(
 
     rprint("\n[bold]Runtime Options[/]")
     dry_run = Confirm.ask("  [cyan]DRY_RUN[/] (don't post replies)?", default=True)
+    debug = Confirm.ask("  [cyan]DEBUG[/] (log incoming events)?", default=True)
 
     rprint("\n[bold]Observability (Logfire)[/]")
     rprint("[dim]Get your token at https://logfire.pydantic.dev/[/]\n")
@@ -152,6 +153,7 @@ def init(
             "",
             "# Runtime",
             f"DRY_RUN={str(dry_run).lower()}",
+            f"DEBUG={str(debug).lower()}",
         ]
     )
 
@@ -270,6 +272,7 @@ def config():
     table.add_row("LLM_BASE_URL", settings.llm_base_url)
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("DRY_RUN", str(settings.dry_run))
+    table.add_row("DEBUG", str(settings.debug))
 
     # Show prompt config path
     prompt_config_source = _find_prompt_config_source()

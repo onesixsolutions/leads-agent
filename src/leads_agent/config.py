@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     # Behavior
     dry_run: bool = Field(default=True, validation_alias="DRY_RUN")
+    debug: bool = Field(default=False, validation_alias="DEBUG")
 
     # Note: Prompt configuration is handled separately via PROMPT_CONFIG_PATH env var
     # or auto-discovered prompt_config.json file. See leads_agent.prompts module.

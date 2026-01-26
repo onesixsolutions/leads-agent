@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from rich.logging import RichHandler
+
 import logfire
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -25,13 +27,15 @@ if TYPE_CHECKING:
 # Configure logfire
 logfire.configure()
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging with Rich handler for pretty output
+logging.basicConfig(level=logging.INFO, handlers=[RichHandler(rich_tracebacks=True)])
 logger = logging.getLogger(__name__)
 
 
 def _is_hubspot_message(settings: Settings, event: dict) -> bool:
     """Check if event is a HubSpot bot message we should process."""
+    if settings.debug:
+        logger.info(f"Event\n{event}")
     # Must be a bot_message subtype
     if event.get("subtype") != "bot_message":
         return False
