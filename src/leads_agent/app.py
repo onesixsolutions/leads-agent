@@ -1,13 +1,6 @@
-"""
-Slack Bolt app for leads-agent using Socket Mode.
-
-Socket Mode uses outbound WebSocket connections, eliminating the need
-for a public HTTPS endpoint. Just set SLACK_BOT_TOKEN and SLACK_APP_TOKEN.
-"""
-
-from __future__ import annotations
-
 import logging
+import os
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import logfire
@@ -16,16 +9,32 @@ from rich.logging import RichHandler
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from .config import Settings, get_settings
-from .models import HubSpotLead
-from .processor import process_and_post
+from leads_agent.config import Settings, get_settings
+from leads_agent.models import HubSpotLead
+from leads_agent.core.processor import process_and_post
 
 if TYPE_CHECKING:
     from slack_bolt.context.say import Say
     from slack_sdk import WebClient
 
-# Configure logfire
-logfire.configure()
+# Configure logfire only if token is available
+_logfire_enabled = bool(os.environ.get("LOGFIRE_TOKEN"))
+if _logfire_enabled:
+    try:
+        logfire.configure()
+    except Exception:
+        # If configuration fails, disable logfire
+        _logfire_enabled = False
+
+
+@contextmanager
+def _logfire_span(name: str, **kwargs):
+    """Context manager for logfire spans that works even when logfire is disabled."""
+    if _logfire_enabled:
+        with logfire.span(name, **kwargs):
+            yield
+    else:
+        yield
 
 # Set up logging with Rich handler
 logging.basicConfig(
@@ -95,7 +104,7 @@ def create_bolt_app(settings: Settings | None = None) -> App:
         logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
 
         # Process and post (reuse existing logic)
-        with logfire.span(
+        with _logfire_span(
             "bolt.handle_hubspot_lead",
             channel=channel,
             thread_ts=event.get("ts"),
@@ -138,7 +147,7 @@ def run_socket_mode(settings: Settings | None = None) -> None:
         settings.slack_app_token.get_secret_value(),
     )
 
-    print("\n[STARTUP] Leads Agent (Socket Mode)")
+    print("\n[STARTUP] Leads Agent")
     print(f"  Channel filter: {settings.slack_channel_id or 'all channels bot is in'}")
     print(f"  Dry run: {settings.dry_run}")
     print("\nListening for HubSpot messages... (Ctrl+C to stop)\n")
@@ -184,7 +193,7 @@ def run_test_mode(
         logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
 
         # Process and post to TEST channel (not as thread reply)
-        with logfire.span(
+        with _logfire_span(
             "bolt.test_mode",
             source_channel=channel,
             test_channel=target_channel,
@@ -237,7 +246,9 @@ def collect_events(
     Stops after collecting `keep` events or on Ctrl+C.
     """
     import json
+    import threading
     from pathlib import Path
+    from time import sleep
 
     from slack_sdk.socket_mode import SocketModeClient
     from slack_sdk.socket_mode.request import SocketModeRequest
@@ -247,25 +258,71 @@ def collect_events(
     settings.require_slack_socket_mode()
 
     collected: list[dict] = []
+    lock = threading.Lock()
+    should_stop = threading.Event()
 
     def save_events():
-        Path(output_file).write_text(json.dumps(collected, indent=2, default=str))
-        print(f"\n[SAVED] {len(collected)} events to {output_file}")
+        """Save collected events to file (thread-safe)."""
+        with lock:
+            if not collected:
+                return
+            try:
+                Path(output_file).write_text(json.dumps(collected, indent=2, default=str))
+                print(f"\n[SAVED] {len(collected)} events to {output_file}")
+            except Exception as e:
+                print(f"\n[ERROR] Failed to save events: {e}")
 
     def handle_socket_mode_request(client: SocketModeClient, req: SocketModeRequest):
         """Capture every raw Socket Mode request."""
-        # Acknowledge immediately
-        client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+        try:
+            # Acknowledge immediately
+            client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
-        # Save the raw payload exactly as received
-        collected.append(req.payload)
-        print(f"[{len(collected)}/{keep}] type={req.type}")
+            # Save the full request data (not just payload) for complete debugging
+            # This includes type, envelope_id, and the full payload structure
+            event_data = {
+                "type": req.type,
+                "envelope_id": req.envelope_id,
+                "payload": req.payload,
+                # Also include raw request attributes if available
+                "raw_request": {
+                    "retry_num": getattr(req, "retry_num", None),
+                    "retry_reason": getattr(req, "retry_reason", None),
+                } if hasattr(req, "retry_num") else None,
+            }
 
-        if len(collected) >= keep:
-            save_events()
-            print("\n[DONE] Reached target count.")
-            import os
-            os._exit(0)
+            with lock:
+                collected.append(event_data)
+                count = len(collected)
+                
+            # Log with more detail
+            event_type = req.type
+            event_subtype = None
+            if isinstance(req.payload, dict):
+                event_data_inner = req.payload.get("event", {})
+                if isinstance(event_data_inner, dict):
+                    event_subtype = event_data_inner.get("subtype")
+                    event_type_detail = event_data_inner.get("type")
+                    if event_type_detail:
+                        event_type = f"{event_type}/{event_type_detail}"
+            
+            print(f"[{count}/{keep}] type={event_type}" + (f" subtype={event_subtype}" if event_subtype else ""))
+
+            # Save periodically (every 5 events) to avoid data loss
+            if count % 5 == 0:
+                save_events()
+
+            # Check if we've reached the target
+            if count >= keep:
+                save_events()
+                print("\n[DONE] Reached target count.")
+                should_stop.set()
+                return
+
+        except Exception as e:
+            print(f"\n[ERROR] Failed to handle request: {e}")
+            import traceback
+            traceback.print_exc()
 
     client = SocketModeClient(
         app_token=settings.slack_app_token.get_secret_value(),
@@ -276,15 +333,35 @@ def collect_events(
     print("\n[COLLECT] Listening for raw Socket Mode events")
     print(f"  Target: {keep} events")
     print(f"  Output: {output_file}")
+    print(f"  Auto-save: Every 5 events")
     print("\nWaiting for events... (Ctrl+C to stop early)\n")
 
     try:
         client.connect()
-        from time import sleep
-        while True:
-            sleep(1)
+        # Wait until we should stop (either target reached or interrupted)
+        while not should_stop.is_set():
+            sleep(0.5)
+            # Check connection health
+            if not client.is_connected():
+                print("\n[WARNING] Socket Mode connection lost. Reconnecting...")
+                try:
+                    client.connect()
+                except Exception as e:
+                    print(f"[ERROR] Failed to reconnect: {e}")
+                    break
     except KeyboardInterrupt:
+        print("\n[INTERRUPTED] Saving collected events...")
         save_events()
         print("\n[INTERRUPTED] Saved partial collection.")
+    except Exception as e:
+        print(f"\n[ERROR] Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        save_events()
     finally:
-        client.close()
+        # Final save to ensure nothing is lost
+        save_events()
+        try:
+            client.close()
+        except Exception:
+            pass

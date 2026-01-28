@@ -1,10 +1,6 @@
-"""Slack client utilities."""
-
-from __future__ import annotations
-
 from slack_sdk import WebClient
 
-from .config import Settings
+from leads_agent.config import Settings
 
 
 def slack_client(settings: Settings) -> WebClient:

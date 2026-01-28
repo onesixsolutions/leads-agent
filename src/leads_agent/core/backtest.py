@@ -1,20 +1,10 @@
-"""
-Backtest module - run classifier on collected events from a JSON file.
-
-Usage:
-    1. Collect events: leads-agent collect --keep 20
-    2. Run backtest: leads-agent backtest collected_events.json
-"""
-
-from __future__ import annotations
-
 import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from .agent import ClassificationResult, classify_lead
-from .config import Settings, get_settings
-from .models import EnrichedLeadClassification, HubSpotLead
+from leads_agent.agent import ClassificationResult, classify_lead
+from leads_agent.config import Settings, get_settings
+from leads_agent.models import EnrichedLeadClassification, HubSpotLead
 
 
 def load_events_from_file(file_path: str | Path) -> list[dict]:
@@ -37,8 +27,16 @@ def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpo
     Extract HubSpot leads from collected events.
     
     Handles both raw Socket Mode payloads and webhook-style events.
+    Supports both old format (just payload) and new format (with type/envelope_id/payload).
     """
-    for payload in events:
+    for event_record in events:
+        # Handle new format: {type, envelope_id, payload, ...}
+        if "payload" in event_record and "type" in event_record:
+            payload = event_record["payload"]
+        else:
+            # Old format: just the payload directly
+            payload = event_record
+        
         # Socket Mode payload has event nested under "event" key
         event = payload.get("event", payload)
         

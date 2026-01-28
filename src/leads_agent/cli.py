@@ -1,5 +1,3 @@
-"""Rich CLI for leads-agent."""
-
 import json
 from pathlib import Path
 
@@ -23,8 +21,8 @@ app = typer.Typer(
 console = Console()
 
 
-@app.command()
-def init(
+@app.command(name="init")
+def init_command(
     output: Path = typer.Option(
         Path(".env"),
         "--output",
@@ -39,346 +37,33 @@ def init(
     ),
 ):
     """Interactive setup wizard to create a .env configuration file."""
-    rprint(Panel.fit("🚀 [bold cyan]Leads Agent Setup Wizard[/]", border_style="cyan"))
-
-    if output.exists() and not force:
-        if not Confirm.ask(f"[yellow]{output}[/] already exists. Overwrite?"):
-            raise typer.Abort()
-
-    rprint("\n[bold]Slack Configuration[/]")
-    rprint("[dim]Create a Slack App at https://api.slack.com/apps[/]")
-    rprint("[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n")
-
-    slack_bot_token = Prompt.ask(
-        "  [cyan]SLACK_BOT_TOKEN[/] [dim](xoxb-...)[/]",
-        default="xoxb-...",
-    )
-    slack_app_token = Prompt.ask(
-        "  [cyan]SLACK_APP_TOKEN[/] [dim](xapp-... for Socket Mode)[/]",
-        default="xapp-...",
-    )
-    slack_channel_id = Prompt.ask(
-        "  [cyan]SLACK_CHANNEL_ID[/]",
-        default="C...",
-    )
-    slack_test_channel_id = Prompt.ask(
-        "  [cyan]SLACK_TEST_CHANNEL_ID[/] [dim](optional, for testing)[/]",
-        default="",
-    )
-
-    rprint("\n[bold]LLM Configuration[/]")
-    rprint("[dim]Default uses OpenAI; set LLM_BASE_URL for Ollama/other providers[/]\n")
-
-    openai_api_key = Prompt.ask(
-        "  [cyan]OPENAI_API_KEY[/]",
-        default="sk-...",
-    )
-    llm_model_name = Prompt.ask(
-        "  [cyan]LLM_MODEL_NAME[/]",
-        default="gpt-4o-mini",
-    )
-
-    rprint("\n[bold]Runtime Options[/]")
-    dry_run = Confirm.ask("  [cyan]DRY_RUN[/] (don't post replies)?", default=True)
-    debug = Confirm.ask("  [cyan]DEBUG[/] (log incoming events)?", default=True)
-
-    rprint("\n[bold]Observability (Logfire)[/]")
-    rprint("[dim]Get your token at https://logfire.pydantic.dev/[/]\n")
-    logfire_token = Prompt.ask(
-        "  [cyan]LOGFIRE_TOKEN[/] [dim](optional, for tracing)[/]",
-        default="",
-    )
-
-    # Prompt Configuration
-    rprint("\n[bold]Prompt Configuration[/] [dim](customize lead classification)[/]")
-    configure_prompts = Confirm.ask("  Configure ICP and qualifying criteria?", default=False)
-
-    prompt_config: dict = {}
-    if configure_prompts:
-        rprint("\n  [dim]Leave blank to skip any field[/]\n")
-
-        company_name = Prompt.ask("  [cyan]Company name[/]", default="")
-        if company_name:
-            prompt_config["company_name"] = company_name
-
-        services_desc = Prompt.ask("  [cyan]Services description[/]", default="")
-        if services_desc:
-            prompt_config["services_description"] = services_desc
-
-        rprint("\n  [bold]Ideal Client Profile (ICP)[/]")
-        icp_desc = Prompt.ask("  [cyan]ICP description[/] [dim](e.g., 'Mid-market B2B SaaS')[/]", default="")
-        target_industries = Prompt.ask("  [cyan]Target industries[/] [dim](comma-separated)[/]", default="")
-        target_sizes = Prompt.ask(
-            "  [cyan]Target company sizes[/] [dim](e.g., SMB, Mid-Market, Enterprise)[/]", default=""
-        )
-
-        if any([icp_desc, target_industries, target_sizes]):
-            icp: dict = {}
-            if icp_desc:
-                icp["description"] = icp_desc
-            if target_industries:
-                icp["target_industries"] = [s.strip() for s in target_industries.split(",")]
-            if target_sizes:
-                icp["target_company_sizes"] = [s.strip() for s in target_sizes.split(",")]
-            prompt_config["icp"] = icp
-
-        rprint("\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]")
-        questions = []
-        while True:
-            q = Prompt.ask("  [cyan]Question[/]", default="")
-            if not q:
-                break
-            questions.append(q)
-        if questions:
-            prompt_config["qualifying_questions"] = questions
-
-    # Build env content
-    env_lines = [
-        "# Slack credentials (Socket Mode)",
-        f"SLACK_BOT_TOKEN={slack_bot_token}",
-        f"SLACK_APP_TOKEN={slack_app_token}",
-        f"SLACK_CHANNEL_ID={slack_channel_id}",
-    ]
-    if slack_test_channel_id:
-        env_lines.append(f"SLACK_TEST_CHANNEL_ID={slack_test_channel_id}")
-
-    env_lines.extend(
-        [
-            "",
-            "# LLM configuration (OpenAI by default)",
-            f"OPENAI_API_KEY={openai_api_key}",
-            f"LLM_MODEL_NAME={llm_model_name}",
-            "# Uncomment for Ollama or other OpenAI-compatible providers:",
-            "# LLM_BASE_URL=http://localhost:11434/v1",
-            "",
-            "# Runtime",
-            f"DRY_RUN={str(dry_run).lower()}",
-            f"DEBUG={str(debug).lower()}",
-        ]
-    )
-
-    # Logfire configuration
-    if logfire_token:
-        env_lines.extend(
-            [
-                "",
-                "# Observability (Logfire)",
-                f"LOGFIRE_TOKEN={logfire_token}",
-            ]
-        )
-    else:
-        env_lines.extend(
-            [
-                "",
-                "# Observability (Logfire)",
-                "# Get your token at https://logfire.pydantic.dev/",
-                "# LOGFIRE_TOKEN=",
-            ]
-        )
-
-    # Determine prompt config file path (same directory as .env)
-    prompt_config_path = output.parent / "prompt_config.json"
-
-    # Add prompt configuration reference
-    if prompt_config:
-        env_lines.extend(
-            [
-                "",
-                "# Prompt Configuration (ICP, qualifying questions, etc.)",
-                "# Points to JSON file - edit prompt_config.json to customize",
-                f"PROMPT_CONFIG_PATH={prompt_config_path}",
-            ]
-        )
-    else:
-        env_lines.extend(
-            [
-                "",
-                "# Prompt Configuration (ICP, qualifying questions, etc.)",
-                "# Uncomment and create prompt_config.json to customize classification",
-                "# See prompt_config.example.json for all available options",
-                f"# PROMPT_CONFIG_PATH={prompt_config_path}",
-            ]
-        )
-
-    env_content = "\n".join(env_lines) + "\n"
-
-    # Write .env file
-    output.write_text(env_content)
-    rprint(f"\n[green]✓[/] Configuration written to [bold]{output}[/]")
-
-    # Write prompt_config.json if configured
-    if prompt_config:
-        prompt_config_content = json.dumps(prompt_config, indent=2)
-        prompt_config_path.write_text(prompt_config_content + "\n")
-        rprint(f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]")
-    else:
-        rprint(f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]")
-
-    rprint("\n[dim]Run [bold]leads-agent config[/] to verify settings[/]")
-    rprint("[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")
+    from leads_agent.core import init_wizard
+    init_wizard(output, force)
 
 
-def _mask(secret, visible: int = 4) -> str:
-    """Mask a secret string, handling SecretStr or None."""
-    if secret is None:
-        return "[not set]"
-    # Handle pydantic SecretStr
-    val = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
-    if len(val) <= visible:
-        return "***"
-    return val[:visible] + "*" * (len(val) - visible)
 
-
-def _find_prompt_config_source() -> str | None:
-    """Find where prompt configuration is being loaded from."""
-    import os
-
-    # Check env var first
-    env_path = os.environ.get("PROMPT_CONFIG_PATH")
-    if env_path and Path(env_path).is_file():
-        return env_path
-
-    # Check default locations
-    candidates = [
-        Path("prompt_config.json"),
-        Path("config/prompt_config.json"),
-        Path.cwd() / "prompt_config.json",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-
-    return None
-
-
-@app.command()
-def config():
+@app.command(name="config")
+def config_command():
     """Display current configuration (from environment)."""
-    try:
-        settings = get_settings()
-    except Exception as e:
-        rprint(f"[red]Error loading settings:[/] {e}")
-        raise typer.Exit(1)
+    from leads_agent.config import display_config
+    display_config()
 
-    table = Table(title="Current Configuration", show_header=True, header_style="bold cyan")
-    table.add_column("Setting", style="cyan")
-    table.add_column("Value")
-
-    table.add_row("SLACK_BOT_TOKEN", _mask(settings.slack_bot_token))
-    table.add_row("SLACK_APP_TOKEN", _mask(settings.slack_app_token))
-    table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id or "[not set]")
-    table.add_row("SLACK_TEST_CHANNEL_ID", settings.slack_test_channel_id or "[not set]")
-    table.add_row("OPENAI_API_KEY", _mask(settings.openai_api_key))
-    table.add_row("LLM_BASE_URL", settings.llm_base_url)
-    table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
-    table.add_row("DRY_RUN", str(settings.dry_run))
-    table.add_row("DEBUG", str(settings.debug))
-
-    # Show prompt config path
-    prompt_config_source = _find_prompt_config_source()
-    table.add_row("PROMPT_CONFIG", prompt_config_source or "[default]")
-
-    console.print(table)
-
-    if prompt_config_source:
-        rprint("\n[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")
-
-
-@app.command()
-def prompts(
+@app.command(name="prompts")
+def prompts_command(
     show_full: bool = typer.Option(False, "--full", "-f", help="Show full rendered prompts"),
     as_json: bool = typer.Option(False, "--json", "-j", help="Output configuration as JSON"),
 ):
     """Display current prompt configuration."""
-    manager = get_prompt_manager()
-    config = manager.config
-
-    if as_json:
-        # Output raw JSON for scripting
-        rprint(json.dumps(config.model_dump(exclude_none=True), indent=2))
-        return
-
-    rprint(Panel.fit("📝 [bold cyan]Prompt Configuration[/]", border_style="cyan"))
-
-    # Show source of configuration
-    config_source = _find_prompt_config_source()
-    if config_source:
-        rprint(f"[dim]Loaded from: {config_source}[/]\n")
-
-    # Check if configuration is empty
-    if config.is_empty():
-        rprint("[yellow]No custom prompt configuration set.[/]")
-        rprint("[dim]Using default prompts. To customize:[/]")
-        rprint("[dim]  1. Run [bold]leads-agent init[/] and configure prompts[/]")
-        rprint("[dim]  2. Set PROMPT_CONFIG_JSON environment variable[/]")
-        rprint("[dim]  3. Create prompt_config.json file (see prompt_config.example.json)[/]")
-        rprint("[dim]  4. Use the API: PUT /config/prompts[/]")
-
-        if show_full:
-            rprint("\n[bold]Default Classification Prompt:[/]")
-            rprint(Syntax(manager.build_classification_prompt(), "text", theme="monokai", word_wrap=True))
-        return
-
-    # Show company info
-    if config.company_name or config.services_description:
-        rprint("[bold]Company:[/]")
-        if config.company_name:
-            rprint(f"  [cyan]Name:[/] {config.company_name}")
-        if config.services_description:
-            rprint(f"  [cyan]Services:[/] {config.services_description}")
-        rprint()
-
-    # ICP section
-    if config.icp:
-        icp = config.icp
-        rprint("[bold]Ideal Client Profile (ICP):[/]")
-        if icp.description:
-            rprint(f"  [cyan]Description:[/] {icp.description}")
-        if icp.target_industries:
-            rprint(f"  [cyan]Industries:[/] {', '.join(icp.target_industries)}")
-        if icp.target_company_sizes:
-            rprint(f"  [cyan]Company Sizes:[/] {', '.join(icp.target_company_sizes)}")
-        if icp.target_roles:
-            rprint(f"  [cyan]Target Roles:[/] {', '.join(icp.target_roles)}")
-        if icp.geographic_focus:
-            rprint(f"  [cyan]Geographic Focus:[/] {', '.join(icp.geographic_focus)}")
-        if icp.disqualifying_signals:
-            rprint(f"  [cyan]Disqualifying:[/] {', '.join(icp.disqualifying_signals)}")
-
-    # Qualifying questions
-    if config.qualifying_questions:
-        rprint("\n[bold]Qualifying Questions:[/]")
-        for i, q in enumerate(config.qualifying_questions, 1):
-            rprint(f"  [dim]{i}.[/] {q}")
-
-    # Custom instructions
-    if config.custom_instructions:
-        rprint("\n[bold]Custom Instructions:[/]")
-        rprint(f"  [dim]{config.custom_instructions}[/]")
-
-    # Research focus areas
-    if config.research_focus_areas:
-        rprint("\n[bold]Research Focus Areas:[/]")
-        for area in config.research_focus_areas:
-            rprint(f"  • {area}")
-
-    # Show full prompts if requested
-    if show_full:
-        rprint("\n" + "─" * 60)
-        rprint("[bold]Full Classification Prompt:[/]")
-        rprint(Syntax(manager.build_classification_prompt(), "text", theme="monokai", word_wrap=True))
-
-        rprint("\n" + "─" * 60)
-        rprint("[bold]Full Research Prompt:[/]")
-        rprint(Syntax(manager.build_research_prompt(), "text", theme="monokai", word_wrap=True))
+    from leads_agent.prompts import display_prompts
+    display_prompts(show_full, as_json)
 
 
-@app.command()
-def run():
+@app.command(name="run")
+def run_command():
     """Start the Slack bot using Socket Mode."""
-    from leads_agent.bolt_app import run_socket_mode
+    from leads_agent.app import run_socket_mode
 
-    rprint(Panel.fit("🔌 [bold green]Starting Leads Agent (Socket Mode)[/]", border_style="green"))
+    rprint(Panel.fit("🔌 [bold green]Starting Leads Agent[/]", border_style="green"))
     run_socket_mode()
 
 
@@ -393,14 +78,14 @@ def collect(
     Saves raw event payloads exactly as received from Slack.
     Useful for inspecting event format and structure.
     """
-    from leads_agent.bolt_app import collect_events
+    from leads_agent.app import collect_events
 
     rprint(Panel.fit("📡 [bold blue]Collecting Raw Socket Mode Events[/]", border_style="blue"))
     collect_events(keep=keep, output_file=output)
 
 
-@app.command()
-def backtest(
+@app.command(name="backtest")
+def backtest_command(
     events_file: Path = typer.Argument(..., help="JSON file with collected events (from `collect` command)"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max number of leads to process"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
@@ -413,7 +98,7 @@ def backtest(
     First collect events with: leads-agent collect --keep 20
     Then backtest with: leads-agent backtest collected_events.json
     """
-    from leads_agent.backtest import run_backtest
+    from leads_agent.core import run_backtest
 
     modes = []
     if debug:
@@ -439,7 +124,7 @@ def test(
 
     Respects DRY_RUN config setting. Use --dry-run or --live to override.
     """
-    from leads_agent.bolt_app import run_test_mode
+    from leads_agent.app import run_test_mode
 
     settings = get_settings()
 
@@ -461,8 +146,8 @@ def test(
     run_test_mode(settings=settings, test_channel=target_channel, max_searches=max_searches)
 
 
-@app.command("pull-history")
-def pull_history(
+@app.command(name="pull-history")
+def pull_history_command(
     output: Path = typer.Option(
         Path("channel_history.json"),
         "--output",
@@ -474,52 +159,13 @@ def pull_history(
     print_only: bool = typer.Option(False, "--print", "-p", help="Print to console instead of saving to file"),
 ):
     """Fetch Slack channel history and save to JSON."""
-    from slack_sdk.errors import SlackApiError
-
-    from leads_agent.slack import slack_client
-
-    settings = get_settings()
-    client = slack_client(settings)
-
-    target_channel = channel_id or settings.slack_channel_id
-    if not target_channel:
-        rprint("[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID")
-        raise typer.Exit(1)
-
-    rprint(Panel.fit("📥 [bold blue]Fetching Channel History[/]", border_style="blue"))
-    rprint(f"[dim]Channel: {target_channel} | Limit: {limit}[/]\n")
-
-    try:
-        resp = client.conversations_history(channel=target_channel, limit=limit)
-    except SlackApiError as e:
-        error_code = e.response.get("error", "unknown")
-        rprint(f"[red]Slack API error:[/] {error_code}")
-
-        # Provide helpful hints for common errors
-        hints = {
-            "not_in_channel": "The bot must be invited to the channel. Use /invite @bot-name in Slack.",
-            "channel_not_found": "Check that the channel ID is correct.",
-            "missing_scope": "The bot token needs 'channels:history' (public) or 'groups:history' (private) scope.",
-            "invalid_auth": "The SLACK_BOT_TOKEN is invalid or expired.",
-        }
-        if error_code in hints:
-            rprint(f"[yellow]Hint:[/] {hints[error_code]}")
-
-        raise typer.Exit(1)
-
-    messages = resp.get("messages", [])
-
-    if print_only:
-        for msg in messages:
-            rprint("=" * 60)
-            rprint(json.dumps(msg, indent=2))
-    else:
-        output.write_text(json.dumps(messages, indent=2))
-        rprint(f"[green]✓[/] Saved {len(messages)} messages to [bold]{output}[/]")
+    from leads_agent.core import pull_history
+    pull_history(channel_id=channel_id, limit=limit, output=output, print_only=print_only)
 
 
-@app.command()
-def replay(
+
+@app.command(name="replay")
+def replay_command(
     limit: int = typer.Option(1, "--limit", "-n", help="Number of HubSpot lead messages to replay"),
     channel_id: str = typer.Option(None, "--channel", "-c", help="Channel ID (defaults to SLACK_CHANNEL_ID)"),
     dry_run: bool = typer.Option(None, "--dry-run/--live", help="Dry-run prints output instead of posting"),
@@ -532,227 +178,22 @@ def replay(
     processing pipeline, and either posts the result back to Slack (thread reply) or
     prints the generated message when --dry-run is enabled.
     """
-    from slack_sdk.errors import SlackApiError
-
-    from leads_agent.models import HubSpotLead
-    from leads_agent.processor import process_and_post
-    from leads_agent.slack import slack_client
-
-    settings = get_settings()
-    try:
-        settings.require_slack_client()
-    except Exception as e:
-        rprint(f"[red]Error loading Slack settings:[/] {e}")
-        raise typer.Exit(1)
-
-    # Override dry_run if explicitly set
-    if dry_run is not None:
-        settings.dry_run = dry_run
-
-    target_channel = channel_id or settings.slack_channel_id
-    if not target_channel:
-        rprint("[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID")
-        raise typer.Exit(1)
-
-    if limit <= 0:
-        rprint("[red]Error:[/] --limit must be >= 1")
-        raise typer.Exit(1)
-
-    client = slack_client(settings)
-
-    rprint(Panel.fit("⏪ [bold blue]Replaying Channel History[/]", border_style="blue"))
-    rprint(f"[dim]Channel: {target_channel} | Leads to replay: {limit} | Dry run: {settings.dry_run}[/]\n")
-
-    # Paginate until we replay `limit` HubSpot lead messages (or history is exhausted).
-    processed = 0
-    cursor: str | None = None
-    scanned = 0
-
-    try:
-        while processed < limit:
-            history_kwargs: dict = {"channel": target_channel, "limit": 200}
-            if cursor:
-                history_kwargs["cursor"] = cursor
-
-            resp = client.conversations_history(**history_kwargs)
-
-            messages = resp.get("messages", [])
-            scanned += len(messages)
-
-            if not messages:
-                break
-
-            for msg in messages:
-                # conversations_history messages don't include channel; add for parity with event payloads
-                event = dict(msg)
-                event["channel"] = target_channel
-
-                # Quick filter (match production behavior)
-                if event.get("subtype") != "bot_message":
-                    continue
-                if event.get("username", "").lower() != "hubspot":
-                    continue
-                if event.get("thread_ts") and event.get("thread_ts") != event.get("ts"):
-                    continue
-                if not event.get("attachments"):
-                    continue
-
-                lead = HubSpotLead.from_slack_event(event)
-                if not lead:
-                    continue
-
-                processed += 1
-
-                result = process_and_post(
-                    settings,
-                    lead,
-                    channel_id=target_channel,
-                    thread_ts=event.get("ts"),  # replay as thread reply, like production
-                    max_searches=max_searches,
-                )
-
-                if settings.dry_run:
-                    rprint(
-                        Panel(
-                            result.slack_message,
-                            title=f"Replay {processed}/{limit}",
-                            border_style="yellow",
-                        )
-                    )
-                else:
-                    ts = event.get("ts", "?")
-                    rprint(f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})")
-
-                if processed >= limit:
-                    break
-
-            cursor = (resp.get("response_metadata") or {}).get("next_cursor") or None
-            if not cursor:
-                break
-
-    except SlackApiError as e:
-        error_code = e.response.get("error", "unknown")
-        rprint(f"[red]Slack API error:[/] {error_code}")
-
-        hints = {
-            "not_in_channel": "The bot must be invited to the channel. Use /invite @bot-name in Slack.",
-            "channel_not_found": "Check that the channel ID is correct.",
-            "missing_scope": "The bot token needs 'channels:history' (public) or 'groups:history' (private) scope.",
-            "invalid_auth": "The SLACK_BOT_TOKEN is invalid or expired.",
-        }
-        if error_code in hints:
-            rprint(f"[yellow]Hint:[/] {hints[error_code]}")
-        raise typer.Exit(1)
-
-    if processed == 0:
-        rprint("[yellow]No HubSpot lead messages found in the scanned history.[/]")
-        rprint("[dim]Make sure HubSpot messages are present and include attachments.[/]")
-        rprint(f"[dim]Messages scanned: {scanned}[/]")
-    elif processed < limit:
-        rprint(f"\n[yellow]Replayed {processed}/{limit} lead messages (history exhausted).[/]")
-        rprint(f"[dim]Messages scanned: {scanned}[/]")
+    from leads_agent.core import replay
+    replay(channel_id=channel_id, limit=limit, dry_run=dry_run, max_searches=max_searches)
 
 
-@app.command()
-def classify(
+
+@app.command(name="classify")
+def classify_command(
     message: str = typer.Argument(..., help="Message text to classify"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Show message history and agent trace"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full message content (no truncation)"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches for enrichment"),
 ):
     """Classify a single message (for quick testing)."""
-    from leads_agent.agent import ClassificationResult, classify_message
-    from leads_agent.models import EnrichedLeadClassification
+    from leads_agent.core import classify
+    classify(message, debug, max_searches, verbose)
 
-    settings = get_settings()
-
-    title = "🧠 [bold yellow]Classifying Message[/]"
-    rprint(Panel.fit(title, border_style="yellow"))
-    rprint(f"[dim]{message}[/]\n")
-
-    result = classify_message(settings, message, debug=debug, max_searches=max_searches)
-
-    # Handle both return types
-    if isinstance(result, ClassificationResult):
-        classification = result.classification
-        label_value = result.label
-        confidence = result.confidence
-        reason = result.reason
-    else:
-        classification = result
-        label_value = result.label.value
-        confidence = result.confidence
-        reason = result.reason
-
-    table = Table(show_header=False, box=None)
-    table.add_column("Field", style="cyan")
-    table.add_column("Value")
-
-    decision_color = {"ignore": "red", "promising": "green"}.get(label_value, "white")
-    table.add_row("Decision", f"[bold {decision_color}]{label_value}[/]")
-    table.add_row("Confidence", f"{confidence:.0%}")
-    table.add_row("Reason", reason)
-
-    if getattr(classification, "score", None) is not None:
-        table.add_row("Score", f"{classification.score}/5")
-    if getattr(classification, "action", None) is not None:
-        table.add_row("Action", classification.action.value)
-    if getattr(classification, "score_reason", None):
-        table.add_row("Score Reason", classification.score_reason)
-
-    if classification.lead_summary:
-        table.add_row("Summary", classification.lead_summary)
-    if classification.key_signals:
-        table.add_row("Signals", ", ".join(classification.key_signals))
-
-    # Show extracted contact info if present
-    if classification.first_name or classification.last_name:
-        name = f"{classification.first_name or ''} {classification.last_name or ''}".strip()
-        table.add_row("Name", name)
-    if classification.email:
-        table.add_row("Email", classification.email)
-    if classification.company:
-        table.add_row("Company", classification.company)
-
-    console.print(table)
-
-    # Show enrichment results if available
-    if isinstance(classification, EnrichedLeadClassification):
-        if classification.company_research:
-            rprint("\n[bold green]─── Company Research ───[/]")
-            cr = classification.company_research
-            rprint(f"[cyan]Company:[/] {cr.company_name}")
-            rprint(f"[cyan]Description:[/] {cr.company_description}")
-            if cr.industry:
-                rprint(f"[cyan]Industry:[/] {cr.industry}")
-            if cr.company_size:
-                rprint(f"[cyan]Size:[/] {cr.company_size}")
-            if cr.website:
-                rprint(f"[cyan]Website:[/] {cr.website}")
-            if cr.relevance_notes:
-                rprint(f"[cyan]Relevance:[/] {cr.relevance_notes}")
-
-        if classification.contact_research:
-            rprint("\n[bold green]─── Contact Research ───[/]")
-            cr = classification.contact_research
-            rprint(f"[cyan]Name:[/] {cr.full_name}")
-            if cr.title:
-                rprint(f"[cyan]Title:[/] {cr.title}")
-            if cr.linkedin_summary:
-                rprint(f"[cyan]Summary:[/] {cr.linkedin_summary}")
-            if cr.relevance_notes:
-                rprint(f"[cyan]Relevance:[/] {cr.relevance_notes}")
-
-        if classification.research_summary:
-            rprint("\n[bold green]─── Research Summary ───[/]")
-            rprint(classification.research_summary)
-
-    # Show debug info if requested
-    if debug and isinstance(result, ClassificationResult):
-        rprint("\n[bold cyan]─── Debug Info ───[/]")
-        rprint(f"[dim]Token usage:[/] {result.usage}")
-        rprint(f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]")
-        rprint(f"[dim]{result.format_history(verbose=verbose)}[/]")
 
 
 def main():

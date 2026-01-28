@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
+import os
 from typing import Any, Callable, TypeVar, overload
 
 import logfire
@@ -12,12 +14,29 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from .config import Settings
-from .models import EnrichedLeadClassification, HubSpotLead, LeadClassification
-from .prompts import get_prompt_manager
+from leads_agent.config import Settings
+from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
+from leads_agent.prompts import get_prompt_manager
 
-logfire.configure()
-logfire.instrument_pydantic_ai()
+# Configure logfire only if token is available
+_logfire_enabled = bool(os.environ.get("LOGFIRE_TOKEN"))
+if _logfire_enabled:
+    try:
+        logfire.configure()
+        logfire.instrument_pydantic_ai()
+    except Exception:
+        # If configuration fails, disable logfire
+        _logfire_enabled = False
+
+
+@contextmanager
+def _logfire_span(name: str, **kwargs):
+    """Context manager for logfire spans that works even when logfire is disabled."""
+    if _logfire_enabled:
+        with logfire.span(name, **kwargs):
+            yield
+    else:
+        yield
 
 TOutput = TypeVar("TOutput")
 
@@ -208,7 +227,7 @@ def classify_lead(
         lead_id = hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
 
     span_name = "lead.classify" if has_parent else "lead.process"
-    with logfire.span(
+    with _logfire_span(
         span_name,
         lead_id=lead_id,
         email=lead.email,

@@ -17,6 +17,7 @@ dependencies = [
   "typer>=0.12",
   "rich>=13.7",
   "logfire>=4.19.0",
+  "ruff>=0.14.14",
 ]
 
 [project.scripts]

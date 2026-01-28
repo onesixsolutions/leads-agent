@@ -1,25 +1,37 @@
-"""
-Lead processing pipeline — shared between production and testing modes.
-
-Production: Event from Slack → process → post as thread reply
-Testing: Pull history → process → post to test channel
-"""
-
-from __future__ import annotations
-
 import hashlib
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import logfire
 from opentelemetry import trace
 
-from .agent import classify_lead
-from .models import EnrichedLeadClassification, HubSpotLead, LeadClassification
-from .slack import slack_client
+from leads_agent.agent import classify_lead
+from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
+from leads_agent.slack import slack_client
 
 if TYPE_CHECKING:
-    from .config import Settings
+    from leads_agent.config import Settings
+
+# Configure logfire only if token is available
+_logfire_enabled = bool(os.environ.get("LOGFIRE_TOKEN"))
+if _logfire_enabled:
+    try:
+        logfire.configure()
+    except Exception:
+        # If configuration fails, disable logfire
+        _logfire_enabled = False
+
+
+@contextmanager
+def _logfire_span(name: str, **kwargs):
+    """Context manager for logfire spans that works even when logfire is disabled."""
+    if _logfire_enabled:
+        with logfire.span(name, **kwargs):
+            yield
+    else:
+        yield
 
 
 @dataclass
@@ -247,7 +259,7 @@ def process_and_post(
     # Only create a top-level lead.process span if we aren't already inside one.
     span_name = "lead.post" if has_parent else "lead.process"
 
-    with logfire.span(
+    with _logfire_span(
         span_name,
         lead_id=trace_id,
         slack_channel_id=channel_id,
