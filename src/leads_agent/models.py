@@ -11,6 +11,7 @@ class LeadLabel(str, Enum):
     ignore = "ignore"
     promising = "promising"
 
+
 class LeadAction(str, Enum):
     """Suggested action to take on this lead."""
 
@@ -76,7 +77,9 @@ class HubSpotLead(BaseModel):
             if match:
                 value = match.group(1).strip()
                 # Clean up the value
-                value = re.sub(r"<mailto:[^|]+\|([^>]+)>", r"\1", value)  # Clean email links
+                value = re.sub(
+                    r"<mailto:[^|]+\|([^>]+)>", r"\1", value
+                )  # Clean email links
                 value = re.sub(r"<[^|]+\|([^>]+)>", r"\1", value)  # Clean other links
                 setattr(lead, field, value)
 
@@ -106,7 +109,9 @@ class LeadClassification(BaseModel):
     first_name: str | None = Field(default=None, description="Contact's first name")
     last_name: str | None = Field(default=None, description="Contact's last name")
     email: str | None = Field(default=None, description="Contact's email address")
-    company: str | None = Field(default=None, description="Contact's company name (if mentioned)")
+    company: str | None = Field(
+        default=None, description="Contact's company name (if mentioned)"
+    )
 
     # Classification
     label: LeadLabel = Field(description="Go/no-go decision: ignore or promising")
@@ -128,11 +133,17 @@ class CompanyResearch(BaseModel):
     """Research findings about a company."""
 
     company_name: str = Field(description="Official company name")
-    company_description: str = Field(description="Brief description of what the company does")
+    company_description: str = Field(
+        description="Brief description of what the company does"
+    )
     industry: str | None = Field(default=None, description="Industry or sector")
-    company_size: str | None = Field(default=None, description="Company size if found (startup, SMB, enterprise)")
+    company_size: str | None = Field(
+        default=None, description="Company size if found (startup, SMB, enterprise)"
+    )
     website: str | None = Field(default=None, description="Company website URL")
-    relevance_notes: str | None = Field(default=None, description="Notes on why this lead might be relevant")
+    relevance_notes: str | None = Field(
+        default=None, description="Notes on why this lead might be relevant"
+    )
 
 
 class ContactResearch(BaseModel):
@@ -140,19 +151,27 @@ class ContactResearch(BaseModel):
 
     full_name: str = Field(description="Contact's full name")
     title: str | None = Field(default=None, description="Job title or role")
-    linkedin_summary: str | None = Field(default=None, description="Brief summary from LinkedIn or similar")
-    relevance_notes: str | None = Field(default=None, description="Notes on the contact's relevance")
+    linkedin_summary: str | None = Field(
+        default=None, description="Brief summary from LinkedIn or similar"
+    )
+    relevance_notes: str | None = Field(
+        default=None, description="Notes on the contact's relevance"
+    )
 
 
 class EnrichedLeadClassification(LeadClassification):
     """Lead classification enriched with web research for promising leads."""
 
     # Research results (only populated for promising leads)
-    company_research: CompanyResearch | None = Field(default=None, description="Research findings about the company")
+    company_research: CompanyResearch | None = Field(
+        default=None, description="Research findings about the company"
+    )
     contact_research: ContactResearch | None = Field(
         default=None, description="Research findings about the contact person"
     )
-    research_summary: str | None = Field(default=None, description="Executive summary of research findings")
+    research_summary: str | None = Field(
+        default=None, description="Executive summary of research findings"
+    )
 
     # Scoring results (only populated when we do scoring; typically for promising leads)
     score: int | None = Field(

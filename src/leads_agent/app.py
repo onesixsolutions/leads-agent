@@ -10,8 +10,8 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from leads_agent.config import Settings, get_settings
-from leads_agent.models import HubSpotLead
 from leads_agent.core.processor import process_and_post
+from leads_agent.models import HubSpotLead
 
 if TYPE_CHECKING:
     from slack_bolt.context.say import Say
@@ -35,6 +35,7 @@ def _logfire_span(name: str, **kwargs):
             yield
     else:
         yield
+
 
 # Set up logging with Rich handler
 logging.basicConfig(
@@ -101,7 +102,9 @@ def create_bolt_app(settings: Settings | None = None) -> App:
             logger.warning("Could not parse HubSpot message")
             return
 
-        logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
+        logger.info(
+            f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>"
+        )
 
         # Process and post (reuse existing logic)
         with _logfire_span(
@@ -117,7 +120,9 @@ def create_bolt_app(settings: Settings | None = None) -> App:
                 thread_ts=event["ts"],
             )
 
-            logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+            logger.info(
+                f"Classified: {result.label} ({result.classification.confidence:.0%})"
+            )
 
     @app.event({"type": "message", "subtype": "message_changed"})
     def handle_message_changed(event: dict):
@@ -190,7 +195,9 @@ def run_test_mode(
             logger.warning("Could not parse HubSpot message")
             return
 
-        logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
+        logger.info(
+            f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>"
+        )
 
         # Process and post to TEST channel (not as thread reply)
         with _logfire_span(
@@ -208,7 +215,9 @@ def run_test_mode(
                 include_lead_info=True,  # Include lead details
             )
 
-            logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+            logger.info(
+                f"Classified: {result.label} ({result.classification.confidence:.0%})"
+            )
             if not settings.dry_run:
                 logger.info(f"Posted to test channel: {target_channel}")
 
@@ -267,7 +276,9 @@ def collect_events(
             if not collected:
                 return
             try:
-                Path(output_file).write_text(json.dumps(collected, indent=2, default=str))
+                Path(output_file).write_text(
+                    json.dumps(collected, indent=2, default=str)
+                )
                 print(f"\n[SAVED] {len(collected)} events to {output_file}")
             except Exception as e:
                 print(f"\n[ERROR] Failed to save events: {e}")
@@ -276,7 +287,9 @@ def collect_events(
         """Capture every raw Socket Mode request."""
         try:
             # Acknowledge immediately
-            client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+            client.send_socket_mode_response(
+                SocketModeResponse(envelope_id=req.envelope_id)
+            )
 
             # Save the full request data (not just payload) for complete debugging
             # This includes type, envelope_id, and the full payload structure
@@ -288,13 +301,15 @@ def collect_events(
                 "raw_request": {
                     "retry_num": getattr(req, "retry_num", None),
                     "retry_reason": getattr(req, "retry_reason", None),
-                } if hasattr(req, "retry_num") else None,
+                }
+                if hasattr(req, "retry_num")
+                else None,
             }
 
             with lock:
                 collected.append(event_data)
                 count = len(collected)
-                
+
             # Log with more detail
             event_type = req.type
             event_subtype = None
@@ -305,8 +320,11 @@ def collect_events(
                     event_type_detail = event_data_inner.get("type")
                     if event_type_detail:
                         event_type = f"{event_type}/{event_type_detail}"
-            
-            print(f"[{count}/{keep}] type={event_type}" + (f" subtype={event_subtype}" if event_subtype else ""))
+
+            print(
+                f"[{count}/{keep}] type={event_type}"
+                + (f" subtype={event_subtype}" if event_subtype else "")
+            )
 
             # Save periodically (every 5 events) to avoid data loss
             if count % 5 == 0:
@@ -322,6 +340,7 @@ def collect_events(
         except Exception as e:
             print(f"\n[ERROR] Failed to handle request: {e}")
             import traceback
+
             traceback.print_exc()
 
     client = SocketModeClient(
@@ -333,7 +352,7 @@ def collect_events(
     print("\n[COLLECT] Listening for raw Socket Mode events")
     print(f"  Target: {keep} events")
     print(f"  Output: {output_file}")
-    print(f"  Auto-save: Every 5 events")
+    print("  Auto-save: Every 5 events")
     print("\nWaiting for events... (Ctrl+C to stop early)\n")
 
     try:
@@ -356,6 +375,7 @@ def collect_events(
     except Exception as e:
         print(f"\n[ERROR] Unexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         save_events()
     finally:

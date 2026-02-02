@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import hashlib
 import os
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar, overload
 
 import logfire
@@ -15,7 +15,11 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from leads_agent.config import Settings
-from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
+from leads_agent.models import (
+    EnrichedLeadClassification,
+    HubSpotLead,
+    LeadClassification,
+)
 from leads_agent.prompts import get_prompt_manager
 
 # Configure logfire only if token is available
@@ -37,6 +41,7 @@ def _logfire_span(name: str, **kwargs):
             yield
     else:
         yield
+
 
 TOutput = TypeVar("TOutput")
 
@@ -77,7 +82,9 @@ class ClassificationResult:
                             content = str(content)[:200] + "..."
                         lines.append(f"  └─ {part_type}: {content}")
                     elif hasattr(part, "tool_name"):
-                        lines.append(f"  └─ {part_type}: {part.tool_name}({getattr(part, 'args', {})})")
+                        lines.append(
+                            f"  └─ {part_type}: {part.tool_name}({getattr(part, 'args', {})})"
+                        )
                     else:
                         lines.append(f"  └─ {part_type}: {part}")
             else:
@@ -152,13 +159,21 @@ def _usage_snapshot(result: Any) -> dict[str, Any]:
     except Exception:
         usage = None
     return {
-        "request_tokens": getattr(usage, "request_tokens", None) if usage is not None else None,
-        "response_tokens": getattr(usage, "response_tokens", None) if usage is not None else None,
-        "total_tokens": getattr(usage, "total_tokens", None) if usage is not None else None,
+        "request_tokens": getattr(usage, "request_tokens", None)
+        if usage is not None
+        else None,
+        "response_tokens": getattr(usage, "response_tokens", None)
+        if usage is not None
+        else None,
+        "total_tokens": getattr(usage, "total_tokens", None)
+        if usage is not None
+        else None,
     }
 
 
-def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadClassification]:
+def _create_triage_agent(
+    settings: Settings, api_key: str
+) -> Agent[None, LeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -170,7 +185,9 @@ def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadCl
     )
 
 
-def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
+def _create_research_agent(
+    settings: Settings, api_key: str
+) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -183,7 +200,9 @@ def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, Enri
     )
 
 
-def _create_scoring_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
+def _create_scoring_agent(
+    settings: Settings, api_key: str
+) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -234,7 +253,11 @@ def classify_lead(
         company=lead.company,
         max_searches=max_searches,
     ):
-        api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+        api_key = (
+            settings.openai_api_key.get_secret_value()
+            if settings.openai_api_key
+            else "ollama"
+        )
 
         triage_agent = _create_triage_agent(settings, api_key)
         prompt = lead.to_prompt_text()
@@ -286,8 +309,15 @@ def _research_lead(
     classification: LeadClassification,
     max_searches: int = 4,
     return_debug: bool = False,
-) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+) -> (
+    EnrichedLeadClassification
+    | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]
+):
+    api_key = (
+        settings.openai_api_key.get_secret_value()
+        if settings.openai_api_key
+        else "ollama"
+    )
     research_agent = _create_research_agent(settings, api_key)
 
     email_domain = ""
@@ -361,8 +391,15 @@ def _score_lead(
     triage: LeadClassification,
     enriched: EnrichedLeadClassification | None,
     return_debug: bool = False,
-) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+) -> (
+    EnrichedLeadClassification
+    | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]
+):
+    api_key = (
+        settings.openai_api_key.get_secret_value()
+        if settings.openai_api_key
+        else "ollama"
+    )
     scoring_agent = _create_scoring_agent(settings, api_key)
 
     name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
@@ -406,4 +443,3 @@ def classify_message(
     """Classify a raw message text using the same pipeline as classify_lead()."""
     lead = HubSpotLead(raw_text=text, message=text)
     return classify_lead(settings, lead, debug=debug, max_searches=max_searches)
-

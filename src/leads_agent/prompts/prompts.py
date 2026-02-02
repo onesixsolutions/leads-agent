@@ -107,5 +107,3 @@ Output requirements:
 - Keep label consistent with the score (ignore for 1-2, promising for 3-5).
 - Include score_reason (brief, concrete).
 """
-
-

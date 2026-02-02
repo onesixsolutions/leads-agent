@@ -12,20 +12,20 @@ def load_events_from_file(file_path: str | Path) -> list[dict]:
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Events file not found: {path}")
-    
+
     with open(path) as f:
         data = json.load(f)
-    
+
     if not isinstance(data, list):
         raise ValueError(f"Expected JSON array, got {type(data).__name__}")
-    
+
     return data
 
 
 def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpotLead]]:
     """
     Extract HubSpot leads from collected events.
-    
+
     Handles both raw Socket Mode payloads and webhook-style events.
     Supports both old format (just payload) and new format (with type/envelope_id/payload).
     """
@@ -36,14 +36,14 @@ def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpo
         else:
             # Old format: just the payload directly
             payload = event_record
-        
+
         # Socket Mode payload has event nested under "event" key
         event = payload.get("event", payload)
-        
+
         # Skip non-message events
         if event.get("type") != "message":
             continue
-        
+
         # Only process HubSpot bot messages
         if event.get("subtype") != "bot_message":
             continue
@@ -69,7 +69,7 @@ def run_backtest(
 ) -> None:
     """
     Run classification on leads from a collected events file.
-    
+
     Args:
         events_file: Path to JSON file created by `leads-agent collect`
         settings: Application settings
@@ -96,7 +96,7 @@ def run_backtest(
     for event, lead in extract_leads_from_events(events):
         if limit and count >= limit:
             break
-            
+
         count += 1
         print("=" * 60)
         print(f"[{count}] Processing lead...")
@@ -145,15 +145,21 @@ def run_backtest(
         if lead.company:
             print(f"Company: {lead.company}")
         if lead.message:
-            msg_preview = lead.message[:200] + "..." if len(lead.message) > 200 else lead.message
+            msg_preview = (
+                lead.message[:200] + "..." if len(lead.message) > 200 else lead.message
+            )
             print(f"Message: {msg_preview}")
         print()
-        label_display = label_value.upper() if isinstance(label_value, str) else label_value
+        label_display = (
+            label_value.upper() if isinstance(label_value, str) else label_value
+        )
         print(f"{label_emoji} {label_display} ({confidence:.0%})")
         print(f"Reason: {reason}")
         if hasattr(classification, "score"):
             try:
-                print(f"Score: {classification.score}/5 ({classification.action.value})")
+                print(
+                    f"Score: {classification.score}/5 ({classification.action.value})"
+                )
                 print(f"Score Reason: {classification.score_reason}")
             except Exception:
                 pass

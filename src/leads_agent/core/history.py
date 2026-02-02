@@ -9,6 +9,7 @@ from pathlib import Path
 from leads_agent.slack import slack_client
 from leads_agent.config import get_settings
 
+
 def pull_history(channel_id: str | None, limit: int, output: Path, print_only: bool):
     settings = get_settings()
     try:
@@ -21,7 +22,9 @@ def pull_history(channel_id: str | None, limit: int, output: Path, print_only: b
 
     target_channel = channel_id or settings.slack_channel_id
     if not target_channel:
-        rprint("[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID")
+        rprint(
+            "[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID"
+        )
         raise typer.Exit(1)
 
     rprint(Panel.fit("📥 [bold blue]Fetching Channel History[/]", border_style="blue"))

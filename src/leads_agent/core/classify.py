@@ -10,6 +10,7 @@ from leads_agent.config import get_settings
 
 console = Console()
 
+
 def classify(message: str, debug: bool, max_searches: int, verbose: bool):
     settings = get_settings()
 
@@ -98,5 +99,7 @@ def classify(message: str, debug: bool, max_searches: int, verbose: bool):
     if debug and isinstance(result, ClassificationResult):
         rprint("\n[bold cyan]─── Debug Info ───[/]")
         rprint(f"[dim]Token usage:[/] {result.usage}")
-        rprint(f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]")
+        rprint(
+            f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]"
+        )
         rprint(f"[dim]{result.format_history(verbose=verbose)}[/]")

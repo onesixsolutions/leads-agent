@@ -5,8 +5,8 @@ from rich.prompt import Confirm, Prompt
 import typer
 import json
 
-def init_wizard(output: Path, force: bool):
 
+def init_wizard(output: Path, force: bool):
     rprint(Panel.fit("🚀 [bold cyan]Leads Agent Setup Wizard[/]", border_style="cyan"))
 
     if output.exists() and not force:
@@ -15,7 +15,9 @@ def init_wizard(output: Path, force: bool):
 
     rprint("\n[bold]Slack Configuration[/]")
     rprint("[dim]Create a Slack App at https://api.slack.com/apps[/]")
-    rprint("[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n")
+    rprint(
+        "[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n"
+    )
 
     slack_bot_token = Prompt.ask(
         "  [cyan]SLACK_BOT_TOKEN[/] [dim](xoxb-...)[/]",
@@ -59,7 +61,9 @@ def init_wizard(output: Path, force: bool):
 
     # Prompt Configuration
     rprint("\n[bold]Prompt Configuration[/] [dim](customize lead classification)[/]")
-    configure_prompts = Confirm.ask("  Configure ICP and qualifying criteria?", default=False)
+    configure_prompts = Confirm.ask(
+        "  Configure ICP and qualifying criteria?", default=False
+    )
 
     prompt_config: dict = {}
     if configure_prompts:
@@ -74,10 +78,16 @@ def init_wizard(output: Path, force: bool):
             prompt_config["services_description"] = services_desc
 
         rprint("\n  [bold]Ideal Client Profile (ICP)[/]")
-        icp_desc = Prompt.ask("  [cyan]ICP description[/] [dim](e.g., 'Mid-market B2B SaaS')[/]", default="")
-        target_industries = Prompt.ask("  [cyan]Target industries[/] [dim](comma-separated)[/]", default="")
+        icp_desc = Prompt.ask(
+            "  [cyan]ICP description[/] [dim](e.g., 'Mid-market B2B SaaS')[/]",
+            default="",
+        )
+        target_industries = Prompt.ask(
+            "  [cyan]Target industries[/] [dim](comma-separated)[/]", default=""
+        )
         target_sizes = Prompt.ask(
-            "  [cyan]Target company sizes[/] [dim](e.g., SMB, Mid-Market, Enterprise)[/]", default=""
+            "  [cyan]Target company sizes[/] [dim](e.g., SMB, Mid-Market, Enterprise)[/]",
+            default="",
         )
 
         if any([icp_desc, target_industries, target_sizes]):
@@ -85,12 +95,18 @@ def init_wizard(output: Path, force: bool):
             if icp_desc:
                 icp["description"] = icp_desc
             if target_industries:
-                icp["target_industries"] = [s.strip() for s in target_industries.split(",")]
+                icp["target_industries"] = [
+                    s.strip() for s in target_industries.split(",")
+                ]
             if target_sizes:
-                icp["target_company_sizes"] = [s.strip() for s in target_sizes.split(",")]
+                icp["target_company_sizes"] = [
+                    s.strip() for s in target_sizes.split(",")
+                ]
             prompt_config["icp"] = icp
 
-        rprint("\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]")
+        rprint(
+            "\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]"
+        )
         questions = []
         while True:
             q = Prompt.ask("  [cyan]Question[/]", default="")
@@ -178,9 +194,13 @@ def init_wizard(output: Path, force: bool):
     if prompt_config:
         prompt_config_content = json.dumps(prompt_config, indent=2)
         prompt_config_path.write_text(prompt_config_content + "\n")
-        rprint(f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]")
+        rprint(
+            f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]"
+        )
     else:
-        rprint(f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]")
+        rprint(
+            f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]"
+        )
 
     rprint("\n[dim]Run [bold]leads-agent config[/] to verify settings[/]")
     rprint("[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")

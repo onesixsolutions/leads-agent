@@ -8,7 +8,11 @@ import logfire
 from opentelemetry import trace
 
 from leads_agent.agent import classify_lead
-from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
+from leads_agent.models import (
+    EnrichedLeadClassification,
+    HubSpotLead,
+    LeadClassification,
+)
 from leads_agent.slack import slack_client
 
 if TYPE_CHECKING:
@@ -75,7 +79,9 @@ def format_slack_message(
         if lead.company:
             parts.append(f"*Company:* {lead.company}")
         if lead.message:
-            msg_preview = lead.message[:150] + "..." if len(lead.message) > 150 else lead.message
+            msg_preview = (
+                lead.message[:150] + "..." if len(lead.message) > 150 else lead.message
+            )
             parts.append(f"*Message:* {msg_preview}")
         parts.append("")  # blank line
 
@@ -87,8 +93,13 @@ def format_slack_message(
     parts.append(f"_{classification.reason}_")
 
     # Optional final score (for promising leads after research+scoring)
-    if getattr(classification, "score", None) is not None and getattr(classification, "action", None) is not None:
-        parts.append(f"\n⭐ *Score:* {classification.score}/5 · *Action:* {classification.action.value}")
+    if (
+        getattr(classification, "score", None) is not None
+        and getattr(classification, "action", None) is not None
+    ):
+        parts.append(
+            f"\n⭐ *Score:* {classification.score}/5 · *Action:* {classification.action.value}"
+        )
         if getattr(classification, "score_reason", None):
             parts.append(f"_{classification.score_reason}_")
 
@@ -114,7 +125,11 @@ def format_slack_message(
                 parts.append(f"• Size: {cr.company_size}")
             if cr.website:
                 # Format URL for Slack clickability
-                url = cr.website if cr.website.startswith("http") else f"https://{cr.website}"
+                url = (
+                    cr.website
+                    if cr.website.startswith("http")
+                    else f"https://{cr.website}"
+                )
                 parts.append(f"• Website: <{url}|{cr.website}>")
             if cr.relevance_notes:
                 parts.append(f"• Relevance: {cr.relevance_notes}")
@@ -125,7 +140,11 @@ def format_slack_message(
             title_str = f" - {cr.title}" if cr.title else ""
             parts.append(f"• *{cr.full_name}*{title_str}")
             if cr.linkedin_summary:
-                summary = cr.linkedin_summary[:300] + "..." if len(cr.linkedin_summary) > 300 else cr.linkedin_summary
+                summary = (
+                    cr.linkedin_summary[:300] + "..."
+                    if len(cr.linkedin_summary) > 300
+                    else cr.linkedin_summary
+                )
                 parts.append(f"• {summary}")
             if cr.relevance_notes:
                 parts.append(f"• Relevance: {cr.relevance_notes}")
@@ -187,12 +206,19 @@ def post_to_slack(
         include_lead_info: If True, include lead details in message
     """
     if settings.dry_run:
-        print(f"[DRY RUN] Would post to {channel_id}" + (f" (thread: {thread_ts})" if thread_ts else ""))
+        print(
+            f"[DRY RUN] Would post to {channel_id}"
+            + (f" (thread: {thread_ts})" if thread_ts else "")
+        )
         return
 
     # Re-format with lead info if needed
     message = (
-        format_slack_message(processed.lead, processed.classification, include_lead_info=include_lead_info)
+        format_slack_message(
+            processed.lead,
+            processed.classification,
+            include_lead_info=include_lead_info,
+        )
         if include_lead_info
         else processed.slack_message
     )

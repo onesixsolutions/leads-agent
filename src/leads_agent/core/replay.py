@@ -9,7 +9,6 @@ from leads_agent.slack import slack_client
 from leads_agent.config import get_settings
 
 
-
 def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
     settings = get_settings()
     try:
@@ -24,7 +23,9 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
 
     target_channel = channel_id or settings.slack_channel_id
     if not target_channel:
-        rprint("[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID")
+        rprint(
+            "[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID"
+        )
         raise typer.Exit(1)
 
     if limit <= 0:
@@ -34,7 +35,9 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
     client = slack_client(settings)
 
     rprint(Panel.fit("⏪ [bold blue]Replaying Channel History[/]", border_style="blue"))
-    rprint(f"[dim]Channel: {target_channel} | Leads to replay: {limit} | Dry run: {settings.dry_run}[/]\n")
+    rprint(
+        f"[dim]Channel: {target_channel} | Leads to replay: {limit} | Dry run: {settings.dry_run}[/]\n"
+    )
 
     # Paginate until we replay `limit` HubSpot lead messages (or history is exhausted).
     processed = 0
@@ -80,7 +83,9 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
                     settings,
                     lead,
                     channel_id=target_channel,
-                    thread_ts=event.get("ts"),  # replay as thread reply, like production
+                    thread_ts=event.get(
+                        "ts"
+                    ),  # replay as thread reply, like production
                     max_searches=max_searches,
                 )
 
@@ -94,7 +99,9 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
                     )
                 else:
                     ts = event.get("ts", "?")
-                    rprint(f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})")
+                    rprint(
+                        f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})"
+                    )
 
                 if processed >= limit:
                     break
@@ -119,8 +126,12 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
 
     if processed == 0:
         rprint("[yellow]No HubSpot lead messages found in the scanned history.[/]")
-        rprint("[dim]Make sure HubSpot messages are present and include attachments.[/]")
+        rprint(
+            "[dim]Make sure HubSpot messages are present and include attachments.[/]"
+        )
         rprint(f"[dim]Messages scanned: {scanned}[/]")
     elif processed < limit:
-        rprint(f"\n[yellow]Replayed {processed}/{limit} lead messages (history exhausted).[/]")
+        rprint(
+            f"\n[yellow]Replayed {processed}/{limit} lead messages (history exhausted).[/]"
+        )
         rprint(f"[dim]Messages scanned: {scanned}[/]")
