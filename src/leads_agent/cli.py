@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from leads_agent.config import get_settings
+from leads_agent.observability import configure_logfire
 
 app = typer.Typer(
     name="leads-agent",
@@ -62,6 +63,7 @@ def run_command():
     from leads_agent.app import run_socket_mode
 
     rprint(Panel.fit("🔌 [bold green]Starting Leads Agent[/]", border_style="green"))
+    configure_logfire()
     run_socket_mode()
 
 
@@ -113,6 +115,9 @@ def backtest_command(
     else:
         source = channel_id or get_settings().slack_channel_id or "not set"
         rprint(f"[dim]Slack history channel: {source}[/]\n")
+
+    configure_logfire()
+
     run_backtest(
         events_file=events_file,
         limit=limit,
@@ -156,6 +161,8 @@ def test(
     rprint(f"[dim]Listening for HubSpot messages → Posting to {target_channel}[/]")
     rprint(f"[dim]Dry run: {settings.dry_run}[/]\n")
 
+    configure_logfire()
+
     run_test_mode(settings=settings, test_channel=target_channel, max_searches=max_searches)
 
 
@@ -193,6 +200,11 @@ def replay_command(
     """
     from leads_agent.core import replay
 
+    rprint(Panel.fit("⏪ [bold blue]Replaying Channel History[/]", border_style="blue"))
+    rprint(f"[dim]Channel: {channel_id} | Leads to replay: {limit} | Dry run: {dry_run}[/]\n")
+
+    configure_logfire()
+
     replay(channel_id=channel_id, limit=limit, dry_run=dry_run, max_searches=max_searches)
 
 
@@ -205,6 +217,12 @@ def classify_command(
 ):
     """Classify a single message (for quick testing)."""
     from leads_agent.core import classify
+
+    title = "🧠 [bold yellow]Classifying Message[/]"
+    rprint(Panel.fit(title, border_style="yellow"))
+    rprint(f"[dim]{message}[/]\n")
+
+    configure_logfire()
 
     classify(message, debug, max_searches, verbose)
 

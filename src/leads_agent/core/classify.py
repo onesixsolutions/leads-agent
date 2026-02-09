@@ -1,22 +1,16 @@
 from rich import print as rprint
-import typer
-from rich.panel import Panel
-from rich.table import Table
 from rich.console import Console
+from rich.table import Table
 
 from leads_agent.agent import ClassificationResult, classify_message
-from leads_agent.models import EnrichedLeadClassification
 from leads_agent.config import get_settings
+from leads_agent.models import EnrichedLeadClassification
 
 console = Console()
 
 
 def classify(message: str, debug: bool, max_searches: int, verbose: bool):
     settings = get_settings()
-
-    title = "🧠 [bold yellow]Classifying Message[/]"
-    rprint(Panel.fit(title, border_style="yellow"))
-    rprint(f"[dim]{message}[/]\n")
 
     result = classify_message(settings, message, debug=debug, max_searches=max_searches)
 
@@ -99,7 +93,5 @@ def classify(message: str, debug: bool, max_searches: int, verbose: bool):
     if debug and isinstance(result, ClassificationResult):
         rprint("\n[bold cyan]─── Debug Info ───[/]")
         rprint(f"[dim]Token usage:[/] {result.usage}")
-        rprint(
-            f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]"
-        )
+        rprint(f"\n[bold cyan]─── Message History ({len(result.message_history)} messages) ───[/]")
         rprint(f"[dim]{result.format_history(verbose=verbose)}[/]")

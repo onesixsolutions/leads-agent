@@ -1,41 +1,12 @@
-import hashlib
-import os
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import logfire
-from opentelemetry import trace
-
 from leads_agent.agent import classify_lead
-from leads_agent.models import (
-    EnrichedLeadClassification,
-    HubSpotLead,
-    LeadClassification,
-)
+from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.slack import slack_client
 
 if TYPE_CHECKING:
     from leads_agent.config import Settings
-
-# Configure logfire only if token is available
-_logfire_enabled = bool(os.environ.get("LOGFIRE_TOKEN"))
-if _logfire_enabled:
-    try:
-        logfire.configure()
-    except Exception:
-        # If configuration fails, disable logfire
-        _logfire_enabled = False
-
-
-@contextmanager
-def _logfire_span(name: str, **kwargs):
-    """Context manager for logfire spans that works even when logfire is disabled."""
-    if _logfire_enabled:
-        with logfire.span(name, **kwargs):
-            yield
-    else:
-        yield
 
 
 @dataclass
@@ -79,9 +50,7 @@ def format_slack_message(
         if lead.company:
             parts.append(f"*Company:* {lead.company}")
         if lead.message:
-            msg_preview = (
-                lead.message[:150] + "..." if len(lead.message) > 150 else lead.message
-            )
+            msg_preview = lead.message[:150] + "..." if len(lead.message) > 150 else lead.message
             parts.append(f"*Message:* {msg_preview}")
         parts.append("")  # blank line
 
@@ -93,13 +62,8 @@ def format_slack_message(
     parts.append(f"_{classification.reason}_")
 
     # Optional final score (for promising leads after research+scoring)
-    if (
-        getattr(classification, "score", None) is not None
-        and getattr(classification, "action", None) is not None
-    ):
-        parts.append(
-            f"\n⭐ *Score:* {classification.score}/5 · *Action:* {classification.action.value}"
-        )
+    if getattr(classification, "score", None) is not None and getattr(classification, "action", None) is not None:
+        parts.append(f"\n⭐ *Score:* {classification.score}/5 · *Action:* {classification.action.value}")
         if getattr(classification, "score_reason", None):
             parts.append(f"_{classification.score_reason}_")
 
@@ -125,11 +89,7 @@ def format_slack_message(
                 parts.append(f"• Size: {cr.company_size}")
             if cr.website:
                 # Format URL for Slack clickability
-                url = (
-                    cr.website
-                    if cr.website.startswith("http")
-                    else f"https://{cr.website}"
-                )
+                url = cr.website if cr.website.startswith("http") else f"https://{cr.website}"
                 parts.append(f"• Website: <{url}|{cr.website}>")
             if cr.relevance_notes:
                 parts.append(f"• Relevance: {cr.relevance_notes}")
@@ -140,11 +100,7 @@ def format_slack_message(
             title_str = f" - {cr.title}" if cr.title else ""
             parts.append(f"• *{cr.full_name}*{title_str}")
             if cr.linkedin_summary:
-                summary = (
-                    cr.linkedin_summary[:300] + "..."
-                    if len(cr.linkedin_summary) > 300
-                    else cr.linkedin_summary
-                )
+                summary = cr.linkedin_summary[:300] + "..." if len(cr.linkedin_summary) > 300 else cr.linkedin_summary
                 parts.append(f"• {summary}")
             if cr.relevance_notes:
                 parts.append(f"• Relevance: {cr.relevance_notes}")
@@ -206,10 +162,7 @@ def post_to_slack(
         include_lead_info: If True, include lead details in message
     """
     if settings.dry_run:
-        print(
-            f"[DRY RUN] Would post to {channel_id}"
-            + (f" (thread: {thread_ts})" if thread_ts else "")
-        )
+        print(f"[DRY RUN] Would post to {channel_id}" + (f" (thread: {thread_ts})" if thread_ts else ""))
         return
 
     # Re-format with lead info if needed
@@ -260,51 +213,14 @@ def process_and_post(
     Returns:
         ProcessedLead with results
     """
-    # Group all agent traces (triage/research/scoring) and Slack posting under one lead span.
-    email_domain = ""
-    if lead.email and "@" in lead.email:
-        email_domain = lead.email.split("@", 1)[1].lower()
+    processed = process_lead(settings, lead, max_searches=max_searches)
 
-    # Prefer Slack timestamp when available; otherwise fall back to a stable short hash.
-    trace_id = thread_ts or (lead.email.lower() if lead.email else "")
-    if not trace_id:
-        base = "|".join(
-            [
-                lead.company or "",
-                email_domain,
-                lead.first_name or "",
-                lead.last_name or "",
-                (lead.message or lead.raw_text or "")[:500],
-            ]
-        )
-        trace_id = hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
-
-    current = trace.get_current_span()
-    has_parent = current.get_span_context().is_valid
-
-    # Only create a top-level lead.process span if we aren't already inside one.
-    span_name = "lead.post" if has_parent else "lead.process"
-
-    with _logfire_span(
-        span_name,
-        lead_id=trace_id,
-        slack_channel_id=channel_id,
-        slack_thread_ts=thread_ts,
-        email=lead.email,
-        email_domain=email_domain,
-        company=lead.company,
-        max_searches=max_searches,
+    post_to_slack(
+        settings,
+        processed,
+        channel_id=channel_id,
+        thread_ts=thread_ts,
         include_lead_info=include_lead_info,
-        dry_run=settings.dry_run,
-    ):
-        processed = process_lead(settings, lead, max_searches=max_searches)
+    )
 
-        post_to_slack(
-            settings,
-            processed,
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            include_lead_info=include_lead_info,
-        )
-
-        return processed
+    return processed

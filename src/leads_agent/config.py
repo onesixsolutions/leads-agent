@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     llm_max_tokens: int = Field(default=4000, validation_alias="LLM_MAX_TOKENS")
 
+    # Observability
+    logfire_token: SecretStr | None = Field(default=None, validation_alias="LOGFIRE_TOKEN")
+
     # Behavior
     dry_run: bool = Field(default=True, validation_alias="DRY_RUN")
     debug: bool = Field(default=False, validation_alias="DEBUG")
@@ -128,6 +131,7 @@ def display_config():
     table.add_row("LLM_BASE_URL", settings.llm_base_url)
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("LLM_MAX_TOKENS", str(settings.llm_max_tokens))
+    table.add_row("LOGFIRE_TOKEN", mask_secret(settings.logfire_token))
     table.add_row("DRY_RUN", str(settings.dry_run))
     table.add_row("DEBUG", str(settings.debug))
 
