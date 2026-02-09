@@ -211,3 +211,4 @@ __marimo__/
 .logfire/
 messages.json
 prompt_config.json
+channel_history.json

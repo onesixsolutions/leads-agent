@@ -5,7 +5,21 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from leads_agent.config import _find_prompt_config_source
-from leads_agent.prompts.manager import get_prompt_manager
+from leads_agent.prompts.manager import PromptManager, get_prompt_manager
+
+
+def _display_full_prompts(manager: PromptManager):
+    rprint("\n" + "─" * 60)
+    rprint("[bold cyan]Full Triage Prompt:[/]")
+    rprint(Syntax(manager.build_triage_prompt(), "markdown", word_wrap=True))
+
+    rprint("\n" + "─" * 60)
+    rprint("[bold cyan]Full Research Prompt:[/]")
+    rprint(Syntax(manager.build_research_prompt(), "markdown", word_wrap=True))
+
+    rprint("\n" + "─" * 60)
+    rprint("[bold cyan]Full Scoring Prompt:[/]")
+    rprint(Syntax(manager.build_scoring_prompt(), "markdown", word_wrap=True))
 
 
 def display_prompts(show_full: bool = False, as_json: bool = False):
@@ -30,21 +44,11 @@ def display_prompts(show_full: bool = False, as_json: bool = False):
         rprint("[dim]Using default prompts. To customize:[/]")
         rprint("[dim]  1. Run [bold]leads-agent init[/] and configure prompts[/]")
         rprint("[dim]  2. Set PROMPT_CONFIG_JSON environment variable[/]")
-        rprint(
-            "[dim]  3. Create prompt_config.json file (see prompt_config.example.json)[/]"
-        )
+        rprint("[dim]  3. Create prompt_config.json file (see prompt_config.example.json)[/]")
         rprint("[dim]  4. Use the API: PUT /config/prompts[/]")
 
         if show_full:
-            rprint("\n[bold]Default Classification Prompt:[/]")
-            rprint(
-                Syntax(
-                    manager.build_classification_prompt(),
-                    "text",
-                    theme="monokai",
-                    word_wrap=True,
-                )
-            )
+            _display_full_prompts(manager)
         return
 
     # Show company info
@@ -75,7 +79,7 @@ def display_prompts(show_full: bool = False, as_json: bool = False):
 
     # Qualifying questions
     if config.qualifying_questions:
-        rprint("\n[bold]Qualifying Questions:[/]")
+        rprint("\n[bold ]Qualifying Questions:[/]")
         for i, q in enumerate(config.qualifying_questions, 1):
             rprint(f"  [dim]{i}.[/] {q}")
 
@@ -92,21 +96,4 @@ def display_prompts(show_full: bool = False, as_json: bool = False):
 
     # Show full prompts if requested
     if show_full:
-        rprint("\n" + "─" * 60)
-        rprint("[bold]Full Classification Prompt:[/]")
-        rprint(
-            Syntax(
-                manager.build_classification_prompt(),
-                "text",
-                theme="monokai",
-                word_wrap=True,
-            )
-        )
-
-        rprint("\n" + "─" * 60)
-        rprint("[bold]Full Research Prompt:[/]")
-        rprint(
-            Syntax(
-                manager.build_research_prompt(), "text", theme="monokai", word_wrap=True
-            )
-        )
+        _display_full_prompts(manager)

@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
+
+import typer
 from rich import print as rprint
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
-import typer
-import json
 
 
 def init_wizard(output: Path, force: bool):
@@ -15,9 +16,7 @@ def init_wizard(output: Path, force: bool):
 
     rprint("\n[bold]Slack Configuration[/]")
     rprint("[dim]Create a Slack App at https://api.slack.com/apps[/]")
-    rprint(
-        "[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n"
-    )
+    rprint("[dim]Enable Socket Mode and generate an App-Level Token with connections:write scope[/]\n")
 
     slack_bot_token = Prompt.ask(
         "  [cyan]SLACK_BOT_TOKEN[/] [dim](xoxb-...)[/]",
@@ -45,7 +44,11 @@ def init_wizard(output: Path, force: bool):
     )
     llm_model_name = Prompt.ask(
         "  [cyan]LLM_MODEL_NAME[/]",
-        default="gpt-4o-mini",
+        default="gpt-5-nano",
+    )
+    llm_max_tokens = Prompt.ask(
+        "  [cyan]LLM_MAX_TOKENS[/] [dim](max output tokens)[/]",
+        default="4000",
     )
 
     rprint("\n[bold]Runtime Options[/]")
@@ -61,9 +64,7 @@ def init_wizard(output: Path, force: bool):
 
     # Prompt Configuration
     rprint("\n[bold]Prompt Configuration[/] [dim](customize lead classification)[/]")
-    configure_prompts = Confirm.ask(
-        "  Configure ICP and qualifying criteria?", default=False
-    )
+    configure_prompts = Confirm.ask("  Configure ICP and qualifying criteria?", default=False)
 
     prompt_config: dict = {}
     if configure_prompts:
@@ -82,9 +83,7 @@ def init_wizard(output: Path, force: bool):
             "  [cyan]ICP description[/] [dim](e.g., 'Mid-market B2B SaaS')[/]",
             default="",
         )
-        target_industries = Prompt.ask(
-            "  [cyan]Target industries[/] [dim](comma-separated)[/]", default=""
-        )
+        target_industries = Prompt.ask("  [cyan]Target industries[/] [dim](comma-separated)[/]", default="")
         target_sizes = Prompt.ask(
             "  [cyan]Target company sizes[/] [dim](e.g., SMB, Mid-Market, Enterprise)[/]",
             default="",
@@ -95,18 +94,12 @@ def init_wizard(output: Path, force: bool):
             if icp_desc:
                 icp["description"] = icp_desc
             if target_industries:
-                icp["target_industries"] = [
-                    s.strip() for s in target_industries.split(",")
-                ]
+                icp["target_industries"] = [s.strip() for s in target_industries.split(",")]
             if target_sizes:
-                icp["target_company_sizes"] = [
-                    s.strip() for s in target_sizes.split(",")
-                ]
+                icp["target_company_sizes"] = [s.strip() for s in target_sizes.split(",")]
             prompt_config["icp"] = icp
 
-        rprint(
-            "\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]"
-        )
+        rprint("\n  [bold]Qualifying Questions[/] [dim](one per line, empty line to finish)[/]")
         questions = []
         while True:
             q = Prompt.ask("  [cyan]Question[/]", default="")
@@ -132,6 +125,7 @@ def init_wizard(output: Path, force: bool):
             "# LLM configuration (OpenAI by default)",
             f"OPENAI_API_KEY={openai_api_key}",
             f"LLM_MODEL_NAME={llm_model_name}",
+            f"LLM_MAX_TOKENS={llm_max_tokens}",
             "# Uncomment for Ollama or other OpenAI-compatible providers:",
             "# LLM_BASE_URL=http://localhost:11434/v1",
             "",
@@ -194,13 +188,10 @@ def init_wizard(output: Path, force: bool):
     if prompt_config:
         prompt_config_content = json.dumps(prompt_config, indent=2)
         prompt_config_path.write_text(prompt_config_content + "\n")
-        rprint(
-            f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]"
-        )
+        rprint(f"[green]✓[/] Prompt configuration written to [bold]{prompt_config_path}[/]")
     else:
-        rprint(
-            f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]"
-        )
+        rprint(f"[dim]To customize prompts, create {prompt_config_path} (see prompt_config.example.json)[/]")
 
     rprint("\n[dim]Run [bold]leads-agent config[/] to verify settings[/]")
+    rprint("[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")
     rprint("[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")

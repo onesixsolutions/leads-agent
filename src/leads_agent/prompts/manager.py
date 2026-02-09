@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from leads_agent.prompts.prompts import (
     BASE_RESEARCH_PROMPT,
     BASE_SCORING_PROMPT,
-    BASE_SYSTEM_PROMPT,
     BASE_TRIAGE_PROMPT,
 )
 
@@ -145,84 +144,13 @@ class PromptManager:
         """Reset to base configuration (clear runtime overrides)."""
         self._runtime_config = None
 
-    def build_classification_prompt(self) -> str:
-        """
-        Build the complete classification system prompt.
-
-        Combines base prompt with deployment-specific configuration.
-        """
-        parts = [BASE_SYSTEM_PROMPT]
-        cfg = self.config
-
-        # Add company context
-        if cfg.company_name or cfg.services_description:
-            context_parts = []
-            if cfg.company_name:
-                context_parts.append(f"Company: {cfg.company_name}")
-            if cfg.services_description:
-                context_parts.append(f"Services: {cfg.services_description}")
-            parts.append(
-                "\n--- Internal Company Context ---\n" + "\n".join(context_parts)
-            )
-
-        # Add ICP criteria
-        if cfg.icp and not cfg.icp.model_dump(exclude_none=True) == {}:
-            icp = cfg.icp
-            icp_parts = []
-
-            if icp.description:
-                icp_parts.append(f"**Target Profile:** {icp.description}")
-
-            if icp.target_industries:
-                icp_parts.append(
-                    f"**Target Industries:** {', '.join(icp.target_industries)}"
-                )
-
-            if icp.target_company_sizes:
-                icp_parts.append(
-                    f"**Target Company Sizes:** {', '.join(icp.target_company_sizes)}"
-                )
-
-            if icp.target_roles:
-                icp_parts.append(
-                    f"**Decision Maker Roles:** {', '.join(icp.target_roles)}"
-                )
-
-            if icp.geographic_focus:
-                icp_parts.append(
-                    f"**Geographic Focus:** {', '.join(icp.geographic_focus)}"
-                )
-
-            if icp.disqualifying_signals:
-                icp_parts.append(
-                    f"**Disqualifying Signals:** {', '.join(icp.disqualifying_signals)}"
-                )
-
-            if icp_parts:
-                parts.append("\n--- Ideal Client Profile ---\n" + "\n".join(icp_parts))
-
-        # Add qualifying questions
-        if cfg.qualifying_questions:
-            questions = "\n".join(f"- {q}" for q in cfg.qualifying_questions)
-            parts.append(
-                f"\n--- Qualifying Questions ---\nConsider these when classifying:\n{questions}"
-            )
-
-        # Add custom instructions
-        if cfg.custom_instructions:
-            parts.append(
-                f"\n--- Additional Instructions ---\n{cfg.custom_instructions}"
-            )
-
-        return "\n".join(parts)
-
     def build_triage_prompt(self) -> str:
         """
         Build triage system prompt.
 
-        Uses the same deployment-specific config as classification, but tuned for speed.
+        Uses the deployment-specific config, but tuned for speed.
         """
-        # Reuse the classification prompt sections (company context, ICP, questions, etc.),
+        # Reuse the same sections (company context, ICP, questions, etc.),
         # but with a triage-focused base prompt.
         parts = [BASE_TRIAGE_PROMPT]
         cfg = self.config

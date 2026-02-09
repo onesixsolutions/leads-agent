@@ -4,6 +4,7 @@ from pathlib import Path
 
 from leads_agent.agent import ClassificationResult, classify_lead
 from leads_agent.config import Settings, get_settings
+from leads_agent.core.history import pull_history
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead
 
 
@@ -60,15 +61,16 @@ def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpo
 
 
 def run_backtest(
-    events_file: str | Path,
+    events_file: str | Path | None,
     settings: Settings | None = None,
     limit: int | None = None,
     max_searches: int = 4,
     debug: bool = False,
     verbose: bool = False,
+    channel_id: str | None = None,
 ) -> None:
     """
-    Run classification on leads from a collected events file.
+    Run classification on leads from a collected events file or Slack history.
 
     Args:
         events_file: Path to JSON file created by `leads-agent collect`
@@ -77,13 +79,24 @@ def run_backtest(
         max_searches: Max web searches per lead
         debug: Show debug output
         verbose: Show full message history (with debug)
+        channel_id: Slack channel ID to pull history from if no file is provided
     """
     if settings is None:
         settings = get_settings()
 
-    # Load events from file
-    events = load_events_from_file(events_file)
-    print(f"Loaded {len(events)} events from {events_file}\n")
+    # Load events from file or pull history
+    if events_file is not None:
+        events = load_events_from_file(events_file)
+        print(f"Loaded {len(events)} events from {events_file}\n")
+    else:
+        events = pull_history(
+            channel_id=channel_id,
+            limit=limit,
+            output=None,
+            print_only=False,
+        )
+        source_channel = channel_id or settings.slack_channel_id or "unknown"
+        print(f"Loaded {len(events)} messages from Slack ({source_channel})\n")
 
     modes = []
     if debug:
@@ -145,21 +158,15 @@ def run_backtest(
         if lead.company:
             print(f"Company: {lead.company}")
         if lead.message:
-            msg_preview = (
-                lead.message[:200] + "..." if len(lead.message) > 200 else lead.message
-            )
+            msg_preview = lead.message[:200] + "..." if len(lead.message) > 200 else lead.message
             print(f"Message: {msg_preview}")
         print()
-        label_display = (
-            label_value.upper() if isinstance(label_value, str) else label_value
-        )
+        label_display = label_value.upper() if isinstance(label_value, str) else label_value
         print(f"{label_emoji} {label_display} ({confidence:.0%})")
         print(f"Reason: {reason}")
         if hasattr(classification, "score"):
             try:
-                print(
-                    f"Score: {classification.score}/5 ({classification.action.value})"
-                )
+                print(f"Score: {classification.score}/5 ({classification.action.value})")
                 print(f"Score Reason: {classification.score_reason}")
             except Exception:
                 pass

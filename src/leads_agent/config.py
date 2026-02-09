@@ -43,29 +43,16 @@ class Settings(BaseSettings):
     )
 
     # Slack
-    slack_bot_token: SecretStr | None = Field(
-        default=None, validation_alias="SLACK_BOT_TOKEN"
-    )
-    slack_app_token: SecretStr | None = Field(
-        default=None, validation_alias="SLACK_APP_TOKEN"
-    )
-    slack_channel_id: str | None = Field(
-        default=None, validation_alias="SLACK_CHANNEL_ID"
-    )
-    slack_test_channel_id: str | None = Field(
-        default=None, validation_alias="SLACK_TEST_CHANNEL_ID"
-    )
+    slack_bot_token: SecretStr | None = Field(default=None, validation_alias="SLACK_BOT_TOKEN")
+    slack_app_token: SecretStr | None = Field(default=None, validation_alias="SLACK_APP_TOKEN")
+    slack_channel_id: str | None = Field(default=None, validation_alias="SLACK_CHANNEL_ID")
+    slack_test_channel_id: str | None = Field(default=None, validation_alias="SLACK_TEST_CHANNEL_ID")
 
     # LLM (OpenAI by default; works with any OpenAI-compatible API)
-    llm_base_url: str = Field(
-        default="https://api.openai.com/v1", validation_alias="LLM_BASE_URL"
-    )
-    llm_model_name: str = Field(
-        default="gpt-4o-mini", validation_alias="LLM_MODEL_NAME"
-    )
-    openai_api_key: SecretStr | None = Field(
-        default=None, validation_alias="OPENAI_API_KEY"
-    )
+    llm_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="LLM_BASE_URL")
+    llm_model_name: str = Field(default="gpt-5-nano", validation_alias="LLM_MODEL_NAME")
+    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    llm_max_tokens: int = Field(default=4000, validation_alias="LLM_MAX_TOKENS")
 
     # Behavior
     dry_run: bool = Field(default=True, validation_alias="DRY_RUN")
@@ -129,21 +116,18 @@ def display_config():
         rprint(f"[red]Error loading settings:[/] {e}")
         raise typer.Exit(1)
 
-    table = Table(
-        title="Current Configuration", show_header=True, header_style="bold cyan"
-    )
+    table = Table(title="Current Configuration", show_header=True, header_style="bold cyan")
     table.add_column("Setting", style="cyan")
     table.add_column("Value")
 
     table.add_row("SLACK_BOT_TOKEN", mask_secret(settings.slack_bot_token))
     table.add_row("SLACK_APP_TOKEN", mask_secret(settings.slack_app_token))
     table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id or "[not set]")
-    table.add_row(
-        "SLACK_TEST_CHANNEL_ID", settings.slack_test_channel_id or "[not set]"
-    )
+    table.add_row("SLACK_TEST_CHANNEL_ID", settings.slack_test_channel_id or "[not set]")
     table.add_row("OPENAI_API_KEY", mask_secret(settings.openai_api_key))
     table.add_row("LLM_BASE_URL", settings.llm_base_url)
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
+    table.add_row("LLM_MAX_TOKENS", str(settings.llm_max_tokens))
     table.add_row("DRY_RUN", str(settings.dry_run))
     table.add_row("DEBUG", str(settings.debug))
 
@@ -154,6 +138,4 @@ def display_config():
     console.print(table)
 
     if prompt_config_source:
-        rprint(
-            "\n[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]"
-        )
+        rprint("\n[dim]Run [bold]leads-agent prompts[/] to view prompt configuration[/]")

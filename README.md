@@ -53,7 +53,7 @@ export SLACK_TEST_CHANNEL_ID="C..."         # Optional: for test mode
 
 # LLM (OpenAI by default)
 export OPENAI_API_KEY="sk-..."
-export LLM_MODEL_NAME="gpt-4o-mini"         # Optional
+export LLM_MODEL_NAME="gpt-5-nano"         # Optional
 
 # Behavior
 export DRY_RUN="true"                       # Set to "false" to post replies
@@ -164,7 +164,7 @@ leads-agent run
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-export LLM_MODEL_NAME="gpt-4o"  # optional, defaults to gpt-4o-mini
+export LLM_MODEL_NAME="gpt-5.2"  # optional, defaults to gpt-5-nano
 ```
 
 ### Ollama (Local)
