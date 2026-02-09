@@ -1,9 +1,6 @@
 import logging
-import os
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-import logfire
 from rich.console import Console
 from rich.logging import RichHandler
 from slack_bolt import App
@@ -16,25 +13,6 @@ from leads_agent.models import HubSpotLead
 if TYPE_CHECKING:
     from slack_bolt.context.say import Say
     from slack_sdk import WebClient
-
-# Configure logfire only if token is available
-_logfire_enabled = bool(os.environ.get("LOGFIRE_TOKEN"))
-if _logfire_enabled:
-    try:
-        logfire.configure()
-    except Exception:
-        # If configuration fails, disable logfire
-        _logfire_enabled = False
-
-
-@contextmanager
-def _logfire_span(name: str, **kwargs):
-    """Context manager for logfire spans that works even when logfire is disabled."""
-    if _logfire_enabled:
-        with logfire.span(name, **kwargs):
-            yield
-    else:
-        yield
 
 
 # Set up logging with Rich handler
@@ -102,27 +80,16 @@ def create_bolt_app(settings: Settings | None = None) -> App:
             logger.warning("Could not parse HubSpot message")
             return
 
-        logger.info(
-            f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>"
+        logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
+
+        result = process_and_post(
+            settings,
+            lead,
+            channel_id=channel,
+            thread_ts=event["ts"],
         )
 
-        # Process and post (reuse existing logic)
-        with _logfire_span(
-            "bolt.handle_hubspot_lead",
-            channel=channel,
-            thread_ts=event.get("ts"),
-            lead_email=lead.email,
-        ):
-            result = process_and_post(
-                settings,
-                lead,
-                channel_id=channel,
-                thread_ts=event["ts"],
-            )
-
-            logger.info(
-                f"Classified: {result.label} ({result.classification.confidence:.0%})"
-            )
+        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
 
     @app.event({"type": "message", "subtype": "message_changed"})
     def handle_message_changed(event: dict):
@@ -195,31 +162,20 @@ def run_test_mode(
             logger.warning("Could not parse HubSpot message")
             return
 
-        logger.info(
-            f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>"
+        logger.info(f"Processing lead: {lead.first_name} {lead.last_name} <{lead.email}>")
+
+        result = process_and_post(
+            settings,
+            lead,
+            channel_id=target_channel,  # Post to test channel
+            thread_ts=None,  # Not as a thread reply
+            max_searches=max_searches,
+            include_lead_info=True,  # Include lead details
         )
 
-        # Process and post to TEST channel (not as thread reply)
-        with _logfire_span(
-            "bolt.test_mode",
-            source_channel=channel,
-            test_channel=target_channel,
-            lead_email=lead.email,
-        ):
-            result = process_and_post(
-                settings,
-                lead,
-                channel_id=target_channel,  # Post to test channel
-                thread_ts=None,  # Not as a thread reply
-                max_searches=max_searches,
-                include_lead_info=True,  # Include lead details
-            )
-
-            logger.info(
-                f"Classified: {result.label} ({result.classification.confidence:.0%})"
-            )
-            if not settings.dry_run:
-                logger.info(f"Posted to test channel: {target_channel}")
+        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+        if not settings.dry_run:
+            logger.info(f"Posted to test channel: {target_channel}")
 
     @app.event({"type": "message", "subtype": "message_changed"})
     def handle_message_changed(event: dict):
@@ -276,9 +232,7 @@ def collect_events(
             if not collected:
                 return
             try:
-                Path(output_file).write_text(
-                    json.dumps(collected, indent=2, default=str)
-                )
+                Path(output_file).write_text(json.dumps(collected, indent=2, default=str))
                 print(f"\n[SAVED] {len(collected)} events to {output_file}")
             except Exception as e:
                 print(f"\n[ERROR] Failed to save events: {e}")
@@ -287,9 +241,7 @@ def collect_events(
         """Capture every raw Socket Mode request."""
         try:
             # Acknowledge immediately
-            client.send_socket_mode_response(
-                SocketModeResponse(envelope_id=req.envelope_id)
-            )
+            client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
             # Save the full request data (not just payload) for complete debugging
             # This includes type, envelope_id, and the full payload structure
@@ -321,10 +273,7 @@ def collect_events(
                     if event_type_detail:
                         event_type = f"{event_type}/{event_type_detail}"
 
-            print(
-                f"[{count}/{keep}] type={event_type}"
-                + (f" subtype={event_subtype}" if event_subtype else "")
-            )
+            print(f"[{count}/{keep}] type={event_type}" + (f" subtype={event_subtype}" if event_subtype else ""))
 
             # Save periodically (every 5 events) to avoid data loss
             if count % 5 == 0:
