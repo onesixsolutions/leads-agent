@@ -10,7 +10,12 @@ from leads_agent.slack import slack_client
 from leads_agent.config import get_settings
 
 
-def pull_history(channel_id: str | None, limit: int, output: Path, print_only: bool):
+def pull_history(
+    channel_id: str | None,
+    limit: int,
+    output: Path | None,
+    print_only: bool,
+) -> list[dict]:
     settings = get_settings()
     try:
         settings.require_slack_client()
@@ -54,6 +59,8 @@ def pull_history(channel_id: str | None, limit: int, output: Path, print_only: b
         for msg in messages:
             rprint("=" * 60)
             rprint(json.dumps(msg, indent=2))
-    else:
+    elif output is not None:
         output.write_text(json.dumps(messages, indent=2))
         rprint(f"[green]✓[/] Saved {len(messages)} messages to [bold]{output}[/]")
+
+    return messages

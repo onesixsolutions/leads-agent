@@ -15,11 +15,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from leads_agent.config import Settings
-from leads_agent.models import (
-    EnrichedLeadClassification,
-    HubSpotLead,
-    LeadClassification,
-)
+from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.prompts import get_prompt_manager
 
 # Configure logfire only if token is available
@@ -48,7 +44,7 @@ TOutput = TypeVar("TOutput")
 
 @dataclass
 class ClassificationResult:
-    """Result of classification with optional debug info."""
+    """Result of triage/scoring pipeline with optional debug info."""
 
     classification: LeadClassification | EnrichedLeadClassification
     message_history: list[ModelMessage] = field(default_factory=list)
@@ -82,9 +78,7 @@ class ClassificationResult:
                             content = str(content)[:200] + "..."
                         lines.append(f"  └─ {part_type}: {content}")
                     elif hasattr(part, "tool_name"):
-                        lines.append(
-                            f"  └─ {part_type}: {part.tool_name}({getattr(part, 'args', {})})"
-                        )
+                        lines.append(f"  └─ {part_type}: {part.tool_name}({getattr(part, 'args', {})})")
                     else:
                         lines.append(f"  └─ {part_type}: {part}")
             else:
@@ -95,7 +89,7 @@ class ClassificationResult:
     def print_debug(self, verbose: bool = False) -> None:
         """Print debug information to console."""
         print("\n" + "=" * 60)
-        print("CLASSIFICATION DEBUG")
+        print("LEAD PIPELINE DEBUG")
         print("=" * 60)
         print(f"Label: {self.label}")
         print(f"Confidence: {self.confidence:.2%}")
@@ -159,21 +153,13 @@ def _usage_snapshot(result: Any) -> dict[str, Any]:
     except Exception:
         usage = None
     return {
-        "request_tokens": getattr(usage, "request_tokens", None)
-        if usage is not None
-        else None,
-        "response_tokens": getattr(usage, "response_tokens", None)
-        if usage is not None
-        else None,
-        "total_tokens": getattr(usage, "total_tokens", None)
-        if usage is not None
-        else None,
+        "request_tokens": getattr(usage, "request_tokens", None) if usage is not None else None,
+        "response_tokens": getattr(usage, "response_tokens", None) if usage is not None else None,
+        "total_tokens": getattr(usage, "total_tokens", None) if usage is not None else None,
     }
 
 
-def _create_triage_agent(
-    settings: Settings, api_key: str
-) -> Agent[None, LeadClassification]:
+def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -181,13 +167,13 @@ def _create_triage_agent(
         llm_api_key=api_key,
         instructions=pm.build_triage_prompt(),
         output_type=LeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=900),
+        model_settings=OpenAIChatModelSettings(
+            temperature=0.0, max_tokens=settings.llm_max_tokens
+        ),
     )
 
 
-def _create_research_agent(
-    settings: Settings, api_key: str
-) -> Agent[None, EnrichedLeadClassification]:
+def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -195,14 +181,14 @@ def _create_research_agent(
         llm_api_key=api_key,
         instructions=pm.build_research_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=8000),
+        model_settings=OpenAIChatModelSettings(
+            temperature=0.0, max_tokens=settings.llm_max_tokens
+        ),
         use_duckduckgo_search=True,
     )
 
 
-def _create_scoring_agent(
-    settings: Settings, api_key: str
-) -> Agent[None, EnrichedLeadClassification]:
+def _create_scoring_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_base_url=settings.llm_base_url,
@@ -210,7 +196,9 @@ def _create_scoring_agent(
         llm_api_key=api_key,
         instructions=pm.build_scoring_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=2500),
+        model_settings=OpenAIChatModelSettings(
+            temperature=0.0, max_tokens=settings.llm_max_tokens
+        ),
     )
 
 
@@ -253,11 +241,7 @@ def classify_lead(
         company=lead.company,
         max_searches=max_searches,
     ):
-        api_key = (
-            settings.openai_api_key.get_secret_value()
-            if settings.openai_api_key
-            else "ollama"
-        )
+        api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
 
         triage_agent = _create_triage_agent(settings, api_key)
         prompt = lead.to_prompt_text()
@@ -309,15 +293,8 @@ def _research_lead(
     classification: LeadClassification,
     max_searches: int = 4,
     return_debug: bool = False,
-) -> (
-    EnrichedLeadClassification
-    | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]
-):
-    api_key = (
-        settings.openai_api_key.get_secret_value()
-        if settings.openai_api_key
-        else "ollama"
-    )
+) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
     research_agent = _create_research_agent(settings, api_key)
 
     email_domain = ""
@@ -391,15 +368,8 @@ def _score_lead(
     triage: LeadClassification,
     enriched: EnrichedLeadClassification | None,
     return_debug: bool = False,
-) -> (
-    EnrichedLeadClassification
-    | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]
-):
-    api_key = (
-        settings.openai_api_key.get_secret_value()
-        if settings.openai_api_key
-        else "ollama"
-    )
+) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
     scoring_agent = _create_scoring_agent(settings, api_key)
 
     name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
