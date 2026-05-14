@@ -34,6 +34,7 @@ oauth_config:
       - groups:history      # Read messages in private channels the bot is invited to
       - groups:read         # View basic private channel info
       - chat:write          # Send messages as the bot
+      - reactions:write     # Add emoji reactions to messages (triage outcome)
 
 settings:
   event_subscriptions:

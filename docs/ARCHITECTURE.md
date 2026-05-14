@@ -328,6 +328,7 @@ leads-agent prompts --json    # Output as JSON
 | `groups:history` | Read private channel messages |
 | `groups:read` | View private channel info |
 | `chat:write` | Post replies |
+| `reactions:write` | Add ✅ / ❌ to the original lead message |
 
 ### Required Tokens
 
