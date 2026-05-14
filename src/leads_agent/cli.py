@@ -190,6 +190,7 @@ def replay_command(
     channel_id: str = typer.Option(None, "--channel", "-c", help="Channel ID (defaults to SLACK_CHANNEL_ID)"),
     dry_run: bool = typer.Option(None, "--dry-run/--live", help="Dry-run prints output instead of posting"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
+    reactions_only: bool = typer.Option(False, "--reactions-only", help="Only add reactions based on existing thread replies, skip re-classification"),
 ):
     """
     Replay HubSpot lead messages from Slack channel history.
@@ -197,15 +198,17 @@ def replay_command(
     Fetches recent channel messages, finds HubSpot bot lead messages, runs the normal
     processing pipeline, and either posts the result back to Slack (thread reply) or
     prints the generated message when --dry-run is enabled.
+
+    Use --reactions-only to skip re-classification and only add emoji reactions
+    based on the existing bot reply already present in each thread.
     """
     from leads_agent.core import replay
 
     rprint(Panel.fit("⏪ [bold blue]Replaying Channel History[/]", border_style="blue"))
-    rprint(f"[dim]Channel: {channel_id} | Leads to replay: {limit} | Dry run: {dry_run}[/]\n")
 
     configure_logfire()
 
-    replay(channel_id=channel_id, limit=limit, dry_run=dry_run, max_searches=max_searches)
+    replay(channel_id=channel_id, limit=limit, dry_run=dry_run, max_searches=max_searches, reactions_only=reactions_only)
 
 
 @app.command(name="classify")

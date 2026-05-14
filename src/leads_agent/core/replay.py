@@ -4,12 +4,12 @@ from rich.panel import Panel
 from slack_sdk.errors import SlackApiError
 
 from leads_agent.config import get_settings
-from leads_agent.core.processor import process_and_post
+from leads_agent.core.processor import REACTION_IGNORED, REACTION_PROMISING, process_and_post, process_lead, react_to_lead_message
 from leads_agent.models import HubSpotLead
 from leads_agent.slack import slack_client
 
 
-def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
+def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int, reactions_only: bool = False):
     settings = get_settings()
     try:
         settings.require_slack_client()
@@ -25,6 +25,8 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
     if not target_channel:
         rprint("[red]Error:[/] No channel ID provided. Use --channel or set SLACK_CHANNEL_ID")
         raise typer.Exit(1)
+
+    rprint(f"[dim]Channel: {target_channel} | Leads to replay: {limit} | Dry run: {settings.dry_run} | Reactions only: {reactions_only}[/]\n")
 
     if limit <= 0:
         rprint("[red]Error:[/] --limit must be >= 1")
@@ -71,26 +73,42 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int):
                     continue
 
                 processed += 1
+                ts = event.get("ts", "?")
 
-                result = process_and_post(
-                    settings,
-                    lead,
-                    channel_id=target_channel,
-                    thread_ts=event.get("ts"),  # replay as thread reply, like production
-                    max_searches=max_searches,
-                )
-
-                if settings.dry_run:
-                    rprint(
-                        Panel(
-                            result.slack_message,
-                            title=f"Replay {processed}/{limit}",
-                            border_style="yellow",
+                if reactions_only:
+                    processed_lead = process_lead(settings, lead, max_searches=max_searches, skip_research=True)
+                    emoji = REACTION_PROMISING if processed_lead.is_promising else REACTION_IGNORED
+                    if settings.dry_run:
+                        rprint(f"[dim][DRY RUN] Would react :{emoji}: on {ts} ({processed}/{limit})[/]")
+                    else:
+                        react_to_lead_message(
+                            settings,
+                            channel_id=target_channel,
+                            timestamp=event.get("ts"),
+                            is_promising=processed_lead.is_promising,
+                            client=client,
                         )
-                    )
+                        rprint(f"[green]✓[/] Reacted :{emoji}: on {ts} ({processed}/{limit})")
                 else:
-                    ts = event.get("ts", "?")
-                    rprint(f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})")
+                    result = process_and_post(
+                        settings,
+                        lead,
+                        channel_id=target_channel,
+                        thread_ts=event.get("ts"),  # replay as thread reply, like production
+                        max_searches=max_searches,
+                        skip_research=settings.dry_run,
+                    )
+
+                    if settings.dry_run:
+                        rprint(
+                            Panel(
+                                result.slack_message,
+                                title=f"Replay {processed}/{limit}",
+                                border_style="yellow",
+                            )
+                        )
+                    else:
+                        rprint(f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})")
 
                 if processed >= limit:
                     break

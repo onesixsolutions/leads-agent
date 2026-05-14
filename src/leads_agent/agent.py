@@ -343,6 +343,27 @@ Research output (if any):
     return output
 
 
+def triage_lead(settings: Settings, lead: HubSpotLead) -> LeadClassification:
+    """Run only the triage stage — no research or scoring."""
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+    agent = _create_triage_agent(settings, api_key)
+    run = agent.run_sync(lead.to_prompt_text())
+    return run.output
+
+
+def enrich_lead(
+    settings: Settings,
+    lead: HubSpotLead,
+    triage: LeadClassification,
+    *,
+    max_searches: int = 4,
+) -> EnrichedLeadClassification:
+    """Run research + scoring on a promising lead (call after triage_lead)."""
+    enriched, _, _ = _research_lead(settings, lead, triage, max_searches=max_searches, return_debug=True)
+    scored, _, _ = _score_lead(settings, lead, triage=triage, enriched=enriched, return_debug=True)
+    return scored
+
+
 def classify_message(
     settings: Settings,
     text: str,

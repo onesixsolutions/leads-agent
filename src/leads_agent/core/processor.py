@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from slack_sdk.errors import SlackApiError
 
-from leads_agent.agent import classify_lead
+from leads_agent.agent import classify_lead, enrich_lead, triage_lead
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.slack import slack_client
 
@@ -126,6 +126,7 @@ def process_lead(
     lead: HubSpotLead,
     *,
     max_searches: int = 4,
+    skip_research: bool = False,
 ) -> ProcessedLead:
     """
     Process a single lead: classify and format response.
@@ -134,15 +135,18 @@ def process_lead(
         settings: Application settings
         lead: Parsed HubSpot lead
         max_searches: Max web searches for enrichment
+        skip_research: If True, run triage only (no web research or scoring)
 
     Returns:
         ProcessedLead with classification and formatted Slack message
     """
-    classification = classify_lead(settings, lead, max_searches=max_searches)
-
-    # Handle ClassificationResult wrapper (from debug mode)
-    if hasattr(classification, "classification"):
-        classification = classification.classification
+    if skip_research:
+        classification: LeadClassification | EnrichedLeadClassification = triage_lead(settings, lead)
+    else:
+        classification = classify_lead(settings, lead, max_searches=max_searches)
+        # Handle ClassificationResult wrapper (from debug mode)
+        if hasattr(classification, "classification"):
+            classification = classification.classification
 
     slack_message = format_slack_message(lead, classification, include_lead_info=False)
 
@@ -197,19 +201,6 @@ def post_to_slack(
 
     client.chat_postMessage(**kwargs)
 
-    # React to the original HubSpot message so the outcome is visible in the
-    # channel without opening the thread. Only applies when replying in-thread
-    # (production mode); test mode posts to a separate channel where the
-    # source message isn't necessarily reachable.
-    if thread_ts:
-        react_to_lead_message(
-            settings,
-            channel_id=channel_id,
-            timestamp=thread_ts,
-            is_promising=processed.is_promising,
-            client=client,
-        )
-
 
 def react_to_lead_message(
     settings: "Settings",
@@ -253,11 +244,13 @@ def process_and_post(
     thread_ts: str | None = None,
     max_searches: int = 4,
     include_lead_info: bool = False,
+    skip_research: bool = False,
 ) -> ProcessedLead:
     """
     Process a lead and post the result to Slack.
 
-    This is the main entry point for both production and testing modes.
+    Reacts to the original message immediately after triage, before any
+    web research runs, so the outcome is visible as early as possible.
 
     Args:
         settings: Application settings
@@ -266,11 +259,36 @@ def process_and_post(
         thread_ts: If provided, post as thread reply (production mode)
         max_searches: Max web searches for enrichment
         include_lead_info: Include lead details in message (test mode)
+        skip_research: If True, run triage only (no web research or scoring)
 
     Returns:
         ProcessedLead with results
     """
-    processed = process_lead(settings, lead, max_searches=max_searches)
+    # Step 1: Triage only — fast, no web searches
+    triaged = triage_lead(settings, lead)
+
+    # Step 2: React immediately so the outcome is visible before research starts
+    if thread_ts:
+        react_to_lead_message(
+            settings,
+            channel_id=channel_id,
+            timestamp=thread_ts,
+            is_promising=triaged.label.value == "promising",
+        )
+
+    # Step 3: Enrich promising leads (research + scoring) unless skipped
+    if triaged.label.value == "promising" and not skip_research:
+        classification: LeadClassification | EnrichedLeadClassification = enrich_lead(
+            settings, lead, triaged, max_searches=max_searches
+        )
+    else:
+        classification = triaged
+
+    processed = ProcessedLead(
+        lead=lead,
+        classification=classification,
+        slack_message=format_slack_message(lead, classification, include_lead_info=False),
+    )
 
     post_to_slack(
         settings,
