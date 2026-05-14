@@ -1,5 +1,8 @@
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from slack_sdk.errors import SlackApiError
 
 from leads_agent.agent import classify_lead
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
@@ -7,6 +10,13 @@ from leads_agent.slack import slack_client
 
 if TYPE_CHECKING:
     from leads_agent.config import Settings
+
+logger = logging.getLogger(__name__)
+
+# Slack emoji names (without surrounding colons) used to signal triage outcome
+# on the original HubSpot message.
+REACTION_PROMISING = "white_check_mark"
+REACTION_IGNORED = "x"
 
 
 @dataclass
@@ -186,6 +196,53 @@ def post_to_slack(
         kwargs["thread_ts"] = thread_ts
 
     client.chat_postMessage(**kwargs)
+
+    # React to the original HubSpot message so the outcome is visible in the
+    # channel without opening the thread. Only applies when replying in-thread
+    # (production mode); test mode posts to a separate channel where the
+    # source message isn't necessarily reachable.
+    if thread_ts:
+        react_to_lead_message(
+            settings,
+            channel_id=channel_id,
+            timestamp=thread_ts,
+            is_promising=processed.is_promising,
+            client=client,
+        )
+
+
+def react_to_lead_message(
+    settings: "Settings",
+    *,
+    channel_id: str,
+    timestamp: str,
+    is_promising: bool,
+    client=None,
+) -> None:
+    """
+    Add an emoji reaction to the original lead message indicating triage outcome.
+
+    Uses ✅ (`white_check_mark`) for promising leads and ❌ (`x`) for ignored
+    leads. Failures are logged but never raised — the thread reply is the
+    primary signal and the reaction is purely additive.
+    """
+    emoji = REACTION_PROMISING if is_promising else REACTION_IGNORED
+
+    if settings.dry_run:
+        print(f"[DRY RUN] Would react :{emoji}: on {channel_id}/{timestamp}")
+        return
+
+    client = client or slack_client(settings)
+    try:
+        client.reactions_add(channel=channel_id, timestamp=timestamp, name=emoji)
+    except SlackApiError as e:
+        error = e.response.get("error", "unknown") if e.response else "unknown"
+        # `already_reacted` is benign (e.g., reprocessing the same event) — log
+        # at debug instead of warning so it doesn't look like a failure.
+        if error == "already_reacted":
+            logger.debug("Reaction :%s: already present on %s/%s", emoji, channel_id, timestamp)
+        else:
+            logger.warning("Failed to add :%s: reaction on %s/%s: %s", emoji, channel_id, timestamp, error)
 
 
 def process_and_post(
