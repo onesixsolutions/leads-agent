@@ -7,6 +7,7 @@ from pydantic_ai import Agent
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from leads_agent.config import Settings
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
@@ -99,7 +100,8 @@ def agent_factory(
     """
     Create an agent in a consistent way across triage/research/scoring.
     """
-    model = AnthropicModel(model_name=llm_model_name, api_key=llm_api_key)
+    provider = AnthropicProvider(api_key=llm_api_key)
+    model = AnthropicModel(model_name=llm_model_name, provider=provider)
 
     tools: list[Any] = list(extra_tools) if extra_tools else []
     if use_duckduckgo_search:
