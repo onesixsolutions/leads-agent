@@ -6,8 +6,7 @@ from typing import Any, Callable, TypeVar, overload
 from pydantic_ai import Agent
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.messages import ModelMessage
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 
 from leads_agent.config import Settings
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
@@ -77,12 +76,11 @@ class ClassificationResult:
 @overload
 def agent_factory(
     *,
-    llm_base_url: str,
     llm_model_name: str,
-    llm_api_key: str = "ollama",
+    llm_api_key: str,
     instructions: str | None = None,
     output_type: type[TOutput],
-    model_settings: OpenAIChatModelSettings,
+    model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
     use_duckduckgo_search: bool = False,
 ) -> Agent[None, TOutput]: ...
@@ -90,20 +88,18 @@ def agent_factory(
 
 def agent_factory(
     *,
-    llm_base_url: str,
     llm_model_name: str,
-    llm_api_key: str = "ollama",
+    llm_api_key: str,
     instructions: str | None = None,
     output_type: type[TOutput],
-    model_settings: OpenAIChatModelSettings,
+    model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
     use_duckduckgo_search: bool = False,
 ) -> Agent[None, TOutput]:
     """
     Create an agent in a consistent way across triage/research/scoring.
     """
-    provider = OpenAIProvider(base_url=llm_base_url, api_key=llm_api_key)
-    model = OpenAIChatModel(model_name=llm_model_name, provider=provider)
+    model = AnthropicModel(model_name=llm_model_name, api_key=llm_api_key)
 
     tools: list[Any] = list(extra_tools) if extra_tools else []
     if use_duckduckgo_search:
@@ -136,24 +132,22 @@ def _usage_snapshot(result: Any) -> dict[str, Any]:
 def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
-        llm_base_url=settings.llm_base_url,
         llm_model_name=settings.llm_model_name,
         llm_api_key=api_key,
         instructions=pm.build_triage_prompt(),
         output_type=LeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
+        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
     )
 
 
 def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
-        llm_base_url=settings.llm_base_url,
         llm_model_name=settings.llm_model_name,
         llm_api_key=api_key,
         instructions=pm.build_research_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
+        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
         use_duckduckgo_search=True,
     )
 
@@ -161,12 +155,11 @@ def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, Enri
 def _create_scoring_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
-        llm_base_url=settings.llm_base_url,
         llm_model_name=settings.llm_model_name,
         llm_api_key=api_key,
         instructions=pm.build_scoring_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=OpenAIChatModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
+        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
     )
 
 
@@ -181,7 +174,7 @@ def classify_lead(
     Classify a HubSpot lead using a multi-stage pipeline:
     triage → (if promising) web research → (if promising) final 1–5 scoring.
     """
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+    api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
 
     triage_agent = _create_triage_agent(settings, api_key)
     prompt = lead.to_prompt_text()
@@ -234,7 +227,7 @@ def _research_lead(
     max_searches: int = 4,
     return_debug: bool = False,
 ) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+    api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
     research_agent = _create_research_agent(settings, api_key)
 
     email_domain = ""
@@ -309,7 +302,7 @@ def _score_lead(
     enriched: EnrichedLeadClassification | None,
     return_debug: bool = False,
 ) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+    api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
     scoring_agent = _create_scoring_agent(settings, api_key)
 
     name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
@@ -345,7 +338,7 @@ Research output (if any):
 
 def triage_lead(settings: Settings, lead: HubSpotLead) -> LeadClassification:
     """Run only the triage stage — no research or scoring."""
-    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else "ollama"
+    api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
     agent = _create_triage_agent(settings, api_key)
     run = agent.run_sync(lead.to_prompt_text())
     return run.output
