@@ -48,10 +48,9 @@ class Settings(BaseSettings):
     slack_channel_id: str | None = Field(default=None, validation_alias="SLACK_CHANNEL_ID")
     slack_test_channel_id: str | None = Field(default=None, validation_alias="SLACK_TEST_CHANNEL_ID")
 
-    # LLM (OpenAI by default; works with any OpenAI-compatible API)
-    llm_base_url: str = Field(default="https://api.openai.com/v1", validation_alias="LLM_BASE_URL")
-    llm_model_name: str = Field(default="gpt-5-nano", validation_alias="LLM_MODEL_NAME")
-    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    # LLM (Anthropic Claude)
+    llm_model_name: str = Field(default="claude-sonnet-4-6", validation_alias="LLM_MODEL_NAME")
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     llm_max_tokens: int = Field(default=4000, validation_alias="LLM_MAX_TOKENS")
 
     # Observability
@@ -127,8 +126,7 @@ def display_config():
     table.add_row("SLACK_APP_TOKEN", mask_secret(settings.slack_app_token))
     table.add_row("SLACK_CHANNEL_ID", settings.slack_channel_id or "[not set]")
     table.add_row("SLACK_TEST_CHANNEL_ID", settings.slack_test_channel_id or "[not set]")
-    table.add_row("OPENAI_API_KEY", mask_secret(settings.openai_api_key))
-    table.add_row("LLM_BASE_URL", settings.llm_base_url)
+    table.add_row("ANTHROPIC_API_KEY", mask_secret(settings.anthropic_api_key))
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("LLM_MAX_TOKENS", str(settings.llm_max_tokens))
     table.add_row("LOGFIRE_TOKEN", mask_secret(settings.logfire_token))

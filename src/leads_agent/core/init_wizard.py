@@ -36,15 +36,15 @@ def init_wizard(output: Path, force: bool):
     )
 
     rprint("\n[bold]LLM Configuration[/]")
-    rprint("[dim]Default uses OpenAI; set LLM_BASE_URL for Ollama/other providers[/]\n")
+    rprint("[dim]Default uses Anthropic Claude (claude-sonnet-4-6)[/]\n")
 
-    openai_api_key = Prompt.ask(
-        "  [cyan]OPENAI_API_KEY[/]",
-        default="sk-...",
+    anthropic_api_key = Prompt.ask(
+        "  [cyan]ANTHROPIC_API_KEY[/]",
+        default="sk-ant-...",
     )
     llm_model_name = Prompt.ask(
         "  [cyan]LLM_MODEL_NAME[/]",
-        default="gpt-5-nano",
+        default="claude-sonnet-4-6",
     )
     llm_max_tokens = Prompt.ask(
         "  [cyan]LLM_MAX_TOKENS[/] [dim](max output tokens)[/]",
@@ -122,12 +122,10 @@ def init_wizard(output: Path, force: bool):
     env_lines.extend(
         [
             "",
-            "# LLM configuration (OpenAI by default)",
-            f"OPENAI_API_KEY={openai_api_key}",
+            "# LLM configuration (Anthropic Claude)",
+            f"ANTHROPIC_API_KEY={anthropic_api_key}",
             f"LLM_MODEL_NAME={llm_model_name}",
             f"LLM_MAX_TOKENS={llm_max_tokens}",
-            "# Uncomment for Ollama or other OpenAI-compatible providers:",
-            "# LLM_BASE_URL=http://localhost:11434/v1",
             "",
             "# Runtime",
             f"DRY_RUN={str(dry_run).lower()}",
