@@ -347,8 +347,9 @@ class PromptManager:
         if clause_pack_lines:
             clause_pack = "\n".join(f"- {line}" for line in clause_pack_lines)
             parts.append(
-                "\n--- Query Operator Clause Pack (use in DuckDuckGo queries) ---\n"
-                "Use these to make searches specific. Combine with quoted company/contact names and site: constraints when useful:\n"
+                "\n--- Query Operator Clause Pack (optional refiners) ---\n"
+                "Optional refiners for when a plain query is too noisy. Do NOT stack many of these into "
+                "one query - over-constrained queries are the main cause of zero results:\n"
                 f"{clause_pack}"
             )
 

@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     llm_max_tokens: int = Field(default=16000, validation_alias="LLM_MAX_TOKENS")
 
+    # Web search (research stage)
+    # `ddgs` fronts several engines. The duckduckgo backend rate-limits to the
+    # point of timing out from a server IP, so it is last in the chain.
+    search_backends: str = Field(
+        default="bing,yahoo,google,brave,mojeek,duckduckgo",
+        validation_alias="SEARCH_BACKENDS",
+        description="Comma-separated search engines, tried in order.",
+    )
+    search_timeout_s: int = Field(
+        default=20,
+        validation_alias="SEARCH_TIMEOUT_S",
+        description="Per-request search timeout; ddgs defaults to 5s, which is too short.",
+    )
+
     # Observability
     logfire_token: SecretStr | None = Field(default=None, validation_alias="LOGFIRE_TOKEN")
 
@@ -62,6 +76,11 @@ class Settings(BaseSettings):
 
     # Note: Prompt configuration is handled separately via PROMPT_CONFIG_PATH env var
     # or auto-discovered prompt_config.json file. See leads_agent.prompts module.
+
+    @property
+    def search_backend_list(self) -> tuple[str, ...]:
+        """`search_backends` parsed into an ordered tuple of engine names."""
+        return tuple(b.strip() for b in self.search_backends.split(",") if b.strip())
 
     def require_slack_socket_mode(self) -> "Settings":
         """Validate settings required for Socket Mode."""
@@ -129,6 +148,8 @@ def display_config():
     table.add_row("ANTHROPIC_API_KEY", mask_secret(settings.anthropic_api_key))
     table.add_row("LLM_MODEL_NAME", settings.llm_model_name)
     table.add_row("LLM_MAX_TOKENS", str(settings.llm_max_tokens))
+    table.add_row("SEARCH_BACKENDS", settings.search_backends)
+    table.add_row("SEARCH_TIMEOUT_S", str(settings.search_timeout_s))
     table.add_row("LOGFIRE_TOKEN", mask_secret(settings.logfire_token))
     table.add_row("DRY_RUN", str(settings.dry_run))
     table.add_row("DEBUG", str(settings.debug))

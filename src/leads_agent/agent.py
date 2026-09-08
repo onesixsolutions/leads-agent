@@ -1,73 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-import logging
-import random
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar, overload
 
-from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 from pydantic_ai import Agent
-from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.tools import Tool
 
 from leads_agent.config import Settings
 from leads_agent.icp_fit import apply_icp_fit
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.prompts import get_prompt_manager
-
-logger = logging.getLogger(__name__)
+from leads_agent.search import DEFAULT_BACKENDS, DEFAULT_TIMEOUT_S, web_search_tool
 
 TOutput = TypeVar("TOutput")
-
-# --- DuckDuckGo pacing -------------------------------------------------------
-#
-# DuckDuckGo rate-limits hard when an agent fires searches back to back, and a
-# throttled call raises — which would otherwise propagate out of the research
-# agent and discard every finding for that lead.
-#
-# The spacing state is deliberately MODULE-level, not per-tool: a fresh
-# research agent (and therefore a fresh tool) is constructed for every lead, so
-# per-instance state would reset between leads and the first search of lead N+1
-# would fire immediately after the last search of lead N — exactly the burst
-# that gets us throttled during a backtest.
-_SEARCH_MIN_INTERVAL_S = 2.0        # steady-state spacing between any two searches
-_SEARCH_MAX_ATTEMPTS = 4            # attempts per query when the tool errors
-_SEARCH_BACKOFF_BASE_S = 2.0        # exponential: 2s, 4s, 8s ...
-_SEARCH_BACKOFF_CAP_S = 30.0        # ceiling for any single backoff sleep
-_SEARCH_RATELIMIT_FACTOR = 3.0      # a ratelimit needs longer than a timeout
-_SEARCH_JITTER = 0.25               # +/- fraction, so parallel leads desynchronise
-
-# Process-global clock for inter-search spacing. A bare float rather than an
-# asyncio primitive on purpose: each Agent.run_sync() may run on its own event
-# loop, and an asyncio.Lock shared across loops raises. Intra-run serialisation
-# is handled by a per-instance lock (always one loop); this only enforces the
-# minimum gap, where a rare lost update just means one slightly short sleep.
-_last_search_at: float = 0.0
-
-# Three distinct outcomes the model must be able to tell apart. Conflating the
-# last two is what would break the company_footprint rule.
-_SEARCH_BUDGET_SPENT = (
-    "SEARCH_BUDGET_EXHAUSTED: no searches remain for this lead. Report what you "
-    "have and mark anything still unestablished as unknown."
-)
-_SEARCH_NO_RESULTS = (
-    "SEARCH_RETURNED_NO_RESULTS: the search ran successfully and genuinely "
-    "returned zero results for this query. This IS evidence of absence for this "
-    "query \u2014 if well-formed searches for the company name and domain all "
-    "come back like this, that supports company_footprint = not_met."
-)
-_SEARCH_UNAVAILABLE = (
-    "SEARCH_UNAVAILABLE: the search tool errored or was rate-limited and did not "
-    "run. This is a TOOLING FAILURE and is NOT evidence about the company \u2014 "
-    "never treat it as an absence of web presence. Mark the affected criteria "
-    "unknown and say the research was unavailable."
-)
-
 
 @dataclass
 class ClassificationResult:
@@ -138,6 +85,8 @@ def agent_factory(
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
     search_budget: int | None = None,
+    search_backends: tuple[str, ...] | None = None,
+    search_timeout_s: int = DEFAULT_TIMEOUT_S,
 ) -> Agent[None, TOutput]: ...
 
 
@@ -150,6 +99,8 @@ def agent_factory(
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
     search_budget: int | None = None,
+    search_backends: tuple[str, ...] | None = None,
+    search_timeout_s: int = DEFAULT_TIMEOUT_S,
 ) -> Agent[None, TOutput]:
     """
     Create an agent in a consistent way across triage/research/assessment.
@@ -159,7 +110,13 @@ def agent_factory(
 
     tools: list[Any] = list(extra_tools) if extra_tools else []
     if search_budget:
-        tools.append(_paced_duckduckgo_tool(search_budget))
+        tools.append(
+            web_search_tool(
+                search_budget,
+                backends=search_backends or DEFAULT_BACKENDS,
+                timeout_s=search_timeout_s,
+            )
+        )
 
     return Agent(
         model=model,
@@ -170,109 +127,6 @@ def agent_factory(
         model_settings=model_settings,
         tools=tools,
     )
-
-
-def _backoff_delay(attempt: int, *, rate_limited: bool) -> float:
-    """Exponential backoff with jitter, capped, longer when rate-limited."""
-    delay = _SEARCH_BACKOFF_BASE_S * (2 ** (attempt - 1))
-    if rate_limited:
-        delay *= _SEARCH_RATELIMIT_FACTOR
-    delay = min(delay, _SEARCH_BACKOFF_CAP_S)
-    return delay * (1.0 + random.uniform(-_SEARCH_JITTER, _SEARCH_JITTER))
-
-
-async def _await_search_slot() -> None:
-    """Sleep until the process-global minimum gap since the last search."""
-    gap = _SEARCH_MIN_INTERVAL_S - (time.monotonic() - _last_search_at)
-    if gap > 0:
-        await asyncio.sleep(gap)
-
-
-def _paced_duckduckgo_tool(max_searches: int) -> Tool:
-    """
-    DuckDuckGo search with global pacing, exponential backoff and a hard budget.
-
-    Guarantees for the caller:
-    - calls are serialised within a run and spaced across the whole process,
-    - transient errors are retried with exponential backoff (longer for a
-      rate-limit) and never escape as exceptions,
-    - a genuine empty result is reported differently from a tool failure, so
-      the company_footprint rule keeps working.
-    """
-    inner = duckduckgo_search_tool()
-    search = inner.function
-    lock = asyncio.Lock()
-    state = {"calls": 0}
-
-    async def duckduckgo_search(query: str) -> Any:
-        """Searches DuckDuckGo for the given query and returns the results.
-
-        Args:
-            query: The query to search for.
-
-        Returns:
-            The search results.
-        """
-        global _last_search_at
-
-        # Serialising matters: concurrent calls are what trip the limiter.
-        async with lock:
-            if state["calls"] >= max_searches:
-                return _SEARCH_BUDGET_SPENT
-            state["calls"] += 1
-
-            saw_empty = False
-            for attempt in range(1, _SEARCH_MAX_ATTEMPTS + 1):
-                await _await_search_slot()
-
-                rate_limited = False
-                try:
-                    results = await search(query)
-                except RatelimitException as exc:
-                    rate_limited = True
-                    results = None
-                    logger.warning(
-                        "duckduckgo rate-limited (attempt %d/%d) for %r: %s",
-                        attempt, _SEARCH_MAX_ATTEMPTS, query, exc,
-                    )
-                except (TimeoutException, DDGSException) as exc:
-                    results = None
-                    logger.warning(
-                        "duckduckgo error (attempt %d/%d) for %r: %s",
-                        attempt, _SEARCH_MAX_ATTEMPTS, query, exc,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # Anything else (network, parsing, validation) is retryable
-                    # too; it must never escape and kill the research stage.
-                    results = None
-                    logger.warning(
-                        "duckduckgo unexpected failure (attempt %d/%d) for %r: %s",
-                        attempt, _SEARCH_MAX_ATTEMPTS, query, exc,
-                    )
-                finally:
-                    _last_search_at = time.monotonic()
-
-                if results:
-                    return results
-
-                if results is not None:
-                    # Ran fine but returned nothing. A soft throttle can look
-                    # like this, so retry once; a second empty is taken as a
-                    # real absence rather than being misreported as a failure.
-                    if saw_empty:
-                        logger.info("duckduckgo returned no results for %r", query)
-                        return _SEARCH_NO_RESULTS
-                    saw_empty = True
-
-                if attempt < _SEARCH_MAX_ATTEMPTS:
-                    await asyncio.sleep(_backoff_delay(attempt, rate_limited=rate_limited))
-
-            if saw_empty:
-                return _SEARCH_NO_RESULTS
-            logger.warning("duckduckgo exhausted %d attempts for %r", _SEARCH_MAX_ATTEMPTS, query)
-            return _SEARCH_UNAVAILABLE
-
-    return Tool(duckduckgo_search, name="duckduckgo_search", takes_ctx=False)
 
 
 # Effort per stage. Triage is a cheap spam filter; the ICP assessment is where
@@ -337,6 +191,8 @@ def _create_research_agent(
         output_type=EnrichedLeadClassification,
         model_settings=_model_settings(settings, "research"),
         search_budget=max_searches,
+        search_backends=settings.search_backend_list,
+        search_timeout_s=settings.search_timeout_s,
     )
 
 

@@ -69,8 +69,8 @@ spam and solicitations; be generous about genuine inquiries.
 BASE_RESEARCH_PROMPT = """\
 You are researching a promising inbound lead to gather context before outreach.
 
-You have access to a DuckDuckGo search tool. Your job is to craft **high-quality search queries**
-and use results to fill in structured research fields.
+You have access to a `web_search` tool (backed by several engines). Your job is to craft
+**high-quality search queries** and use results to fill in structured research fields.
 
 Search strategy (do this in order):
 1) Confirm the company EXISTS and is who they say they are — official website,
@@ -92,7 +92,7 @@ Search strategy (do this in order):
    e) TRIGGERS: AI mandate, platform migration, acquisition/carve-out/PE deal.
 4) If a contact name is available, find role/title and seniority
 
-Query-writing rules (DuckDuckGo):
+Query-writing rules:
 - Before each tool call, draft 2–3 candidate queries, then pick the best one.
 - Make queries specific and disambiguated: include entity + a qualifier.
 - Use operators when helpful:
@@ -101,6 +101,11 @@ Query-writing rules (DuckDuckGo):
   - Exclusions to remove noise: -jobs -careers -hiring -pdf -login
   - OR groups (use sparingly): (pricing OR customers OR case study)
 - Avoid low-signal queries like "company website" or single-word searches.
+- Keep queries SHORT. Stacking many operators, quoted phrases and OR groups into one
+  query is the most common cause of zero results. Start with the plainest query that
+  could work (e.g. `Uline annual revenue`) and only add operators if it is too noisy.
+- If a query returns SEARCH_RETURNED_NO_RESULTS, try a SIMPLER one before concluding
+  anything — drop the operators and quotes first, then shorten to the entity name.
 
 Recommended query templates:
 - Company identity/website:
