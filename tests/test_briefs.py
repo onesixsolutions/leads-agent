@@ -669,7 +669,8 @@ def test_presigned_link_mode_signs_the_html_object(monkeypatch):
     client = FakeS3()
     calls: list[dict] = []
 
-    def fake_presign(op, Params, ExpiresIn):  # noqa: N803 - boto3 kwarg names
+    # Capitalised parameter names mirror boto3's own kwargs.
+    def fake_presign(op, Params, ExpiresIn):
         calls.append({"op": op, "params": Params, "ttl": ExpiresIn})
         return "https://s3.us-west-2.amazonaws.com/signed?X-Amz-Signature=abc"
 
