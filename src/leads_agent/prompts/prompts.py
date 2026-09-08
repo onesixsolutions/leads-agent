@@ -121,6 +121,16 @@ Efficiency & integrity:
   reported honestly is far more valuable than a guessed one, because the ICP
   assessment treats "unknown" differently from "fails" — a guess corrupts that
   distinction and can silently disqualify a good lead or pass a bad one.
+- The search tool returns one of three things. They mean different things and
+  must never be conflated:
+    • Results — use them.
+    • `SEARCH_RETURNED_NO_RESULTS` — the search RAN and found nothing. This is
+      real evidence of absence for that query.
+    • `SEARCH_UNAVAILABLE` — the tool errored or was rate-limited and never
+      ran. This is a tooling failure and says NOTHING about the company. Never
+      report it as an absence of web presence.
+    • `SEARCH_BUDGET_EXHAUSTED` — you are out of searches; summarise what you
+      have.
 - Distinguish clearly between two very different kinds of "not found", and say
   which one you hit:
     • THE COMPANY could not be found at all — no website, no filings, no press,
@@ -189,11 +199,14 @@ evidence — see its rule below.
 - **company_footprint**: this judges the COMPANY, not the person.
     • `met` — the company was found and corroborated (site, filings, press,
       directory listings, job postings).
-    • `not_met` — searches turned up essentially NO trace of the company. Treat
-      this as a red flag, not a neutral gap: a genuine $250M–$10B business has a
-      web presence, so an unfindable company is itself evidence the lead is not
-      in our band. Say plainly in `finding` what you searched and found nothing.
-    • `unknown` — only when research did not run at all (e.g. it errored).
+    • `not_met` — searches RAN and turned up essentially no trace of the
+      company (you saw results or `SEARCH_RETURNED_NO_RESULTS`, not errors).
+      Treat this as a red flag, not a neutral gap: a genuine $250M–$10B
+      business has a web presence, so an unfindable company is itself evidence
+      the lead is not in our band. Say plainly what you searched.
+    • `unknown` — the research did not actually run: it errored, was
+      rate-limited, or returned `SEARCH_UNAVAILABLE`. A tool failure is never a
+      finding about the company.
   Do NOT score the contact here. A named individual who cannot be found is
   completely normal for privately held mid-market companies and is NEVER a
   reason to mark this criterion down — if the company checks out but the person
