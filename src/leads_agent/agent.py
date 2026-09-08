@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar, overload
 
@@ -8,13 +11,34 @@ from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.tools import Tool
 
 from leads_agent.config import Settings
 from leads_agent.icp_fit import apply_icp_fit
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.prompts import get_prompt_manager
 
+logger = logging.getLogger(__name__)
+
 TOutput = TypeVar("TOutput")
+
+# DuckDuckGo throttles aggressively when an agent fires searches back to back,
+# and a throttled call raises — which previously killed the entire research
+# stage and left the lead with no research at all. Serialise the calls, space
+# them out, retry, and degrade to an explicit message rather than an exception.
+_SEARCH_MIN_INTERVAL_S = 1.5
+_SEARCH_MAX_ATTEMPTS = 3
+_SEARCH_UNAVAILABLE = (
+    "SEARCH_UNAVAILABLE: the search tool failed or was rate-limited for this "
+    "query. This is a TOOLING FAILURE, not evidence that the company does not "
+    "exist \u2014 do not treat it as an absence of web presence. Retry with a "
+    "different query if you have budget left, otherwise mark the affected "
+    "criteria unknown and say the research was unavailable."
+)
+_SEARCH_BUDGET_SPENT = (
+    "SEARCH_BUDGET_EXHAUSTED: no searches remain for this lead. Report what you "
+    "have and mark anything still unestablished as unknown."
+)
 
 
 @dataclass
@@ -85,7 +109,7 @@ def agent_factory(
     output_type: type[TOutput],
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
-    use_duckduckgo_search: bool = False,
+    search_budget: int | None = None,
 ) -> Agent[None, TOutput]: ...
 
 
@@ -97,7 +121,7 @@ def agent_factory(
     output_type: type[TOutput],
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
-    use_duckduckgo_search: bool = False,
+    search_budget: int | None = None,
 ) -> Agent[None, TOutput]:
     """
     Create an agent in a consistent way across triage/research/assessment.
@@ -106,8 +130,8 @@ def agent_factory(
     model = AnthropicModel(model_name=llm_model_name, provider=provider)
 
     tools: list[Any] = list(extra_tools) if extra_tools else []
-    if use_duckduckgo_search:
-        tools.append(duckduckgo_search_tool())
+    if search_budget:
+        tools.append(_paced_duckduckgo_tool(search_budget))
 
     return Agent(
         model=model,
@@ -118,6 +142,66 @@ def agent_factory(
         model_settings=model_settings,
         tools=tools,
     )
+
+
+def _paced_duckduckgo_tool(max_searches: int) -> Tool:
+    """
+    DuckDuckGo search with a serialised queue, spacing, retries and a hard
+    call budget.
+
+    The stock tool lets the model issue several searches concurrently, which
+    reliably trips DuckDuckGo's rate limiter; the resulting exception used to
+    propagate out of the research agent and discard every finding for that
+    lead. Failures here return a string the model can reason about instead.
+    """
+    inner = duckduckgo_search_tool()
+    search = inner.function
+    lock = asyncio.Lock()
+    state = {"last": 0.0, "calls": 0}
+
+    async def duckduckgo_search(query: str) -> Any:
+        """Searches DuckDuckGo for the given query and returns the results.
+
+        Args:
+            query: The query to search for.
+
+        Returns:
+            The search results.
+        """
+        # Serialising is the point: concurrent calls are what get throttled.
+        async with lock:
+            if state["calls"] >= max_searches:
+                return _SEARCH_BUDGET_SPENT
+            state["calls"] += 1
+
+            for attempt in range(1, _SEARCH_MAX_ATTEMPTS + 1):
+                gap = _SEARCH_MIN_INTERVAL_S - (time.monotonic() - state["last"])
+                if gap > 0:
+                    await asyncio.sleep(gap)
+                try:
+                    results = await search(query)
+                # Any failure here is retryable and must not escape: an
+                # exception would discard the whole research stage.
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "duckduckgo_search attempt %d/%d failed for %r: %s",
+                        attempt, _SEARCH_MAX_ATTEMPTS, query, exc,
+                    )
+                    results = None
+                finally:
+                    state["last"] = time.monotonic()
+
+                if results:
+                    return results
+                # An empty result set is indistinguishable from a soft throttle,
+                # so back off and try again before giving up on the query.
+                if attempt < _SEARCH_MAX_ATTEMPTS:
+                    await asyncio.sleep(_SEARCH_MIN_INTERVAL_S * attempt)
+
+            logger.warning("duckduckgo_search exhausted retries for %r", query)
+            return _SEARCH_UNAVAILABLE
+
+    return Tool(duckduckgo_search, name="duckduckgo_search", takes_ctx=False)
 
 
 # Effort per stage. Triage is a cheap spam filter; the ICP assessment is where
@@ -171,7 +255,9 @@ def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadCl
     )
 
 
-def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
+def _create_research_agent(
+    settings: Settings, api_key: str, max_searches: int = 4
+) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_model_name=settings.llm_model_name,
@@ -179,7 +265,7 @@ def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, Enri
         instructions=pm.build_research_prompt(),
         output_type=EnrichedLeadClassification,
         model_settings=_model_settings(settings, "research"),
-        use_duckduckgo_search=True,
+        search_budget=max_searches,
     )
 
 
@@ -262,7 +348,7 @@ def _research_lead(
     return_debug: bool = False,
 ) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
     api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
-    research_agent = _create_research_agent(settings, api_key)
+    research_agent = _create_research_agent(settings, api_key, max_searches=max_searches)
 
     email_domain = ""
     if lead.email and "@" in lead.email:
