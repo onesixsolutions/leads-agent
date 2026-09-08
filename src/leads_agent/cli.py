@@ -96,11 +96,17 @@ def backtest_command(
     """
     Run classifier on collected events or Slack history (console output only).
 
-    First collect events with: leads-agent collect --keep 20
-    Then backtest with: leads-agent backtest collected_events.json
+    Never posts to Slack and never adds reactions — use this, not `replay`,
+    to test against real leads.
 
-    Or pull directly from Slack history:
-    leads-agent backtest --channel C123 --history-limit 20
+    Recommended flow for real Slack data (--limit counts LEADS, not messages):
+
+        leads-agent pull-history -n 200 -o channel_history.json
+        leads-agent backtest channel_history.json --limit 5
+
+    Passing --channel instead of a file pulls history inline, but note that
+    --limit is then applied to BOTH the message fetch and the lead cap, so a
+    small value will usually find fewer leads than requested.
     """
     from leads_agent.core import run_backtest
 
