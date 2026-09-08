@@ -89,7 +89,10 @@ def create_bolt_app(settings: Settings | None = None) -> App:
             thread_ts=event["ts"],
         )
 
-        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+        logger.info(
+            f"Classified: {result.label}"
+            + (f" · ICP: {result.classification.icp_verdict.value}" if getattr(result.classification, "icp_verdict", None) else "")
+        )
 
     @app.event({"type": "message", "subtype": "message_changed"})
     def handle_message_changed(event: dict):
@@ -173,7 +176,10 @@ def run_test_mode(
             include_lead_info=True,  # Include lead details
         )
 
-        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+        logger.info(
+            f"Classified: {result.label}"
+            + (f" · ICP: {result.classification.icp_verdict.value}" if getattr(result.classification, "icp_verdict", None) else "")
+        )
         if not settings.dry_run:
             logger.info(f"Posted to test channel: {target_channel}")
 

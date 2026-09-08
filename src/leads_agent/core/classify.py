@@ -4,6 +4,8 @@ from rich.table import Table
 
 from leads_agent.agent import ClassificationResult, classify_message
 from leads_agent.config import get_settings
+from leads_agent.icp_fit import verdict_display
+from leads_agent.core.icp_report import format_icp_report
 from leads_agent.models import EnrichedLeadClassification
 
 console = Console()
@@ -18,12 +20,10 @@ def classify(message: str, debug: bool, max_searches: int, verbose: bool):
     if isinstance(result, ClassificationResult):
         classification = result.classification
         label_value = result.label
-        confidence = result.confidence
         reason = result.reason
     else:
         classification = result
         label_value = result.label.value
-        confidence = result.confidence
         reason = result.reason
 
     table = Table(show_header=False, box=None)
@@ -32,15 +32,14 @@ def classify(message: str, debug: bool, max_searches: int, verbose: bool):
 
     decision_color = {"ignore": "red", "promising": "green"}.get(label_value, "white")
     table.add_row("Decision", f"[bold {decision_color}]{label_value}[/]")
-    table.add_row("Confidence", f"{confidence:.0%}")
     table.add_row("Reason", reason)
 
-    if getattr(classification, "score", None) is not None:
-        table.add_row("Score", f"{classification.score}/5")
+    verdict = getattr(classification, "icp_verdict", None)
+    if verdict is not None:
+        emoji, vlabel = verdict_display(verdict)
+        table.add_row("ICP Verdict", f"[bold]{emoji} {vlabel}[/]")
     if getattr(classification, "action", None) is not None:
         table.add_row("Action", classification.action.value)
-    if getattr(classification, "score_reason", None):
-        table.add_row("Score Reason", classification.score_reason)
 
     if classification.lead_summary:
         table.add_row("Summary", classification.lead_summary)
@@ -57,6 +56,10 @@ def classify(message: str, debug: bool, max_searches: int, verbose: bool):
         table.add_row("Company", classification.company)
 
     console.print(table)
+
+    report = format_icp_report(classification)
+    if report.strip():
+        rprint(report)
 
     # Show enrichment results if available
     if isinstance(classification, EnrichedLeadClassification):

@@ -5,6 +5,7 @@ from pathlib import Path
 from leads_agent.agent import ClassificationResult, classify_lead
 from leads_agent.config import Settings, get_settings
 from leads_agent.core.history import pull_history
+from leads_agent.core.icp_report import format_icp_report
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead
 
 
@@ -125,7 +126,6 @@ def run_backtest(
         if isinstance(result, ClassificationResult):
             classification = result.classification
             label_value = result.label
-            confidence = result.confidence
             reason = result.reason
 
             if debug:
@@ -147,7 +147,6 @@ def run_backtest(
         else:
             classification = result
             label_value = result.label.value
-            confidence = result.confidence
             reason = result.reason
 
         label_emoji = {"ignore": "🚫", "promising": "✅"}.get(label_value, "❓")
@@ -162,14 +161,10 @@ def run_backtest(
             print(f"Message: {msg_preview}")
         print()
         label_display = label_value.upper() if isinstance(label_value, str) else label_value
-        print(f"{label_emoji} {label_display} ({confidence:.0%})")
+        print(f"{label_emoji} {label_display}")
         print(f"Reason: {reason}")
-        if hasattr(classification, "score"):
-            try:
-                print(f"Score: {classification.score}/5 ({classification.action.value})")
-                print(f"Score Reason: {classification.score_reason}")
-            except Exception:
-                pass
+
+        print(format_icp_report(classification))
         if getattr(classification, "lead_summary", None):
             print(f"Summary: {classification.lead_summary}")
         if getattr(classification, "key_signals", None):

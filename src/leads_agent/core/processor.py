@@ -5,7 +5,13 @@ from typing import TYPE_CHECKING
 from slack_sdk.errors import SlackApiError
 
 from leads_agent.agent import classify_lead, enrich_lead, triage_lead
-from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
+from leads_agent.icp_fit import verdict_display
+from leads_agent.models import (
+    EnrichedLeadClassification,
+    HubSpotLead,
+    ICPVerdict,
+    LeadClassification,
+)
 from leads_agent.slack import slack_client
 
 if TYPE_CHECKING:
@@ -64,18 +70,60 @@ def format_slack_message(
             parts.append(f"*Message:* {msg_preview}")
         parts.append("")  # blank line
 
-    # Go / No-go (hide taxonomy)
+    # Stage 1: intent go/no-go. Binary — no confidence percentage.
     if classification.label.value == "promising":
-        parts.append(f"✅ *GO* ({classification.confidence:.0%})")
+        parts.append("✅ *GO* — genuine inquiry")
     else:
-        parts.append(f"🚫 *IGNORE* ({classification.confidence:.0%})")
+        parts.append("🚫 *IGNORE* — not a genuine inquiry")
     parts.append(f"_{classification.reason}_")
 
-    # Optional final score (for promising leads after research+scoring)
-    if getattr(classification, "score", None) is not None and getattr(classification, "action", None) is not None:
-        parts.append(f"\n⭐ *Score:* {classification.score}/5 · *Action:* {classification.action.value}")
-        if getattr(classification, "score_reason", None):
-            parts.append(f"_{classification.score_reason}_")
+    # Stage 2: ICP verdict, with the criteria that produced it.
+    verdict = getattr(classification, "icp_verdict", None)
+    if verdict is not None and verdict != ICPVerdict.not_evaluated:
+        emoji, label = verdict_display(verdict)
+        parts.append(f"\n{emoji} *{label}*")
+
+        brief = getattr(classification, "brief", None)
+        if brief and brief.icp_statement:
+            parts.append(f"*{brief.icp_statement}*")
+
+        # Why it is / isn't in ICP — the point of the whole exercise.
+        reasons_out = getattr(classification, "reasons_out_of_icp", None)
+        if reasons_out:
+            parts.append("\n*Why not in ICP:*")
+            parts.extend(f"• {r}" for r in reasons_out)
+
+        reasons_in = getattr(classification, "reasons_in_icp", None)
+        if reasons_in:
+            parts.append("\n*Why in ICP:*")
+            parts.extend(f"• {r}" for r in reasons_in)
+
+        open_qs = getattr(classification, "open_questions", None)
+        if open_qs:
+            parts.append("\n*Unverified — find out before pursuing:*")
+            parts.extend(f"• {q}" for q in open_qs)
+
+        # Judgement layer.
+        if brief:
+            if brief.analyst_take:
+                parts.append(f"\n*🧠 Take:* {brief.analyst_take}")
+            if brief.opportunity:
+                parts.append(f"*📈 Opportunity:* {brief.opportunity}")
+            if brief.risks:
+                parts.append("*⚠️ Risks:* " + "; ".join(brief.risks))
+            if brief.exception_case:
+                parts.append(f"*🚩 Exception case:* {brief.exception_case}")
+            if brief.recommended_entry:
+                parts.append(f"\n*🚪 Recommended entry:* {brief.recommended_entry}")
+            if brief.accelerators:
+                parts.append("*🧰 Accelerators:* " + ", ".join(brief.accelerators))
+            if brief.talking_points:
+                parts.append("\n*💬 Talking points:*")
+                parts.extend(f"• {t}" for t in brief.talking_points)
+
+        action = getattr(classification, "action", None)
+        if action is not None:
+            parts.append(f"\n*Action:* `{action.value}`")
 
     # Optional lead summary/signals (useful when triage output includes them)
     if classification.lead_summary:
@@ -98,7 +146,6 @@ def format_slack_message(
             if cr.company_size:
                 parts.append(f"• Size: {cr.company_size}")
             if cr.website:
-                # Format URL for Slack clickability
                 url = cr.website if cr.website.startswith("http") else f"https://{cr.website}"
                 parts.append(f"• Website: <{url}|{cr.website}>")
             if cr.relevance_notes:
@@ -116,7 +163,7 @@ def format_slack_message(
                 parts.append(f"• Relevance: {cr.relevance_notes}")
 
         if classification.research_summary:
-            parts.append(f"\n*📝 Summary:*\n{classification.research_summary}")
+            parts.append(f"\n*📝 Research summary:*\n{classification.research_summary}")
 
     return "\n".join(parts)
 
@@ -135,7 +182,7 @@ def process_lead(
         settings: Application settings
         lead: Parsed HubSpot lead
         max_searches: Max web searches for enrichment
-        skip_research: If True, run triage only (no web research or scoring)
+        skip_research: If True, run triage only (no web research or assessment)
 
     Returns:
         ProcessedLead with classification and formatted Slack message
@@ -259,7 +306,7 @@ def process_and_post(
         thread_ts: If provided, post as thread reply (production mode)
         max_searches: Max web searches for enrichment
         include_lead_info: Include lead details in message (test mode)
-        skip_research: If True, run triage only (no web research or scoring)
+        skip_research: If True, run triage only (no web research or assessment)
 
     Returns:
         ProcessedLead with results

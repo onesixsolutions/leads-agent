@@ -14,7 +14,7 @@
 When HubSpot posts a lead to your Slack channel, Leads Agent:
 1. Parses contact info (name, email, company)
 2. Does a fast **go/no-go** triage (promising vs ignore)
-3. If **promising**, researches the company/contact and produces a **1–5 score** + recommended action
+3. If **promising**, researches the company/contact and produces an **ICP verdict** — with the criteria that justify it — plus an outreach brief
 4. Posts a threaded reply with the decision and context
 
 ---
@@ -51,9 +51,10 @@ export SLACK_APP_TOKEN="xapp-..."           # App-Level Token (connections:write
 export SLACK_CHANNEL_ID="C..."              # Production channel
 export SLACK_TEST_CHANNEL_ID="C..."         # Optional: for test mode
 
-# LLM (OpenAI by default)
-export OPENAI_API_KEY="sk-..."
-export LLM_MODEL_NAME="gpt-5-nano"         # Optional
+# LLM (Anthropic Claude)
+export ANTHROPIC_API_KEY="sk-ant-..."
+export LLM_MODEL_NAME="claude-opus-5"      # Optional, this is the default
+export LLM_MAX_TOKENS="16000"              # Optional; shared with thinking budget
 
 # Behavior
 export DRY_RUN="true"                       # Set to "false" to post replies
@@ -104,7 +105,7 @@ leads-agent prompts --full          # Show rendered prompts
 leads-agent run                     # Start bot (Socket Mode)
 
 # Classification
-leads-agent classify "message"      # Triage; if promising, auto research + score
+leads-agent classify "message"      # Triage; if promising, auto research + ICP assessment
 
 # Event Collection & Testing
 leads-agent collect --keep 20       # Collect raw Socket Mode events
@@ -160,26 +161,24 @@ leads-agent run
 
 ## LLM Configuration
 
-### OpenAI (Default)
+### Anthropic Claude
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-export LLM_MODEL_NAME="gpt-5.2"  # optional, defaults to gpt-5-nano
+export ANTHROPIC_API_KEY="sk-ant-..."
+export LLM_MODEL_NAME="claude-opus-5"   # default
+export LLM_MAX_TOKENS="16000"
 ```
 
-### Ollama (Local)
+Opus is the default deliberately: the ICP assessment has to make judgement calls
+("this reads like a seed-stage startup", "small ask but it opens the portfolio")
+rather than pattern-match keywords, and that is where the reasoning quality
+shows up. Depth is tuned per stage with adaptive thinking plus effort in
+`agent.py::_model_settings` — triage runs at `low`, research at `high`, the ICP
+assessment at `xhigh`.
 
-```bash
-ollama serve
-ollama pull llama3.1:8b
-
-export LLM_BASE_URL="http://localhost:11434/v1"
-export LLM_MODEL_NAME="llama3.1:8b"
-```
-
-### Other Providers
-
-Any OpenAI-compatible API works — set `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `OPENAI_API_KEY`.
+> The Opus 5 / Sonnet 5 generation **rejects** `temperature`, `top_p`, `top_k`
+> and thinking `budget_tokens` with an HTTP 400. Use `anthropic_effort` instead;
+> don't reintroduce a temperature setting.
 
 ---
 
@@ -244,7 +243,7 @@ leads-agent prompts --json    # Output as JSON
 | "Missing SLACK_APP_TOKEN" | Generate App-Level Token with `connections:write` scope |
 | No classifications happening | Verify bot is invited to channel; check HubSpot is posting |
 | Backtest shows no leads | Run `pull-history --print` to verify HubSpot messages exist |
-| LLM errors | Check `OPENAI_API_KEY`; for Ollama ensure server is running |
+| LLM errors | Check `ANTHROPIC_API_KEY` and `LLM_MODEL_NAME` |
 
 ---
 

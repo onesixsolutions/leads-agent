@@ -18,8 +18,8 @@ def _display_full_prompts(manager: PromptManager):
     rprint(Syntax(manager.build_research_prompt(), "markdown", word_wrap=True))
 
     rprint("\n" + "─" * 60)
-    rprint("[bold cyan]Full Scoring Prompt:[/]")
-    rprint(Syntax(manager.build_scoring_prompt(), "markdown", word_wrap=True))
+    rprint("[bold cyan]Full ICP Assessment Prompt:[/]")
+    rprint(Syntax(manager.build_icp_assessment_prompt(), "markdown", word_wrap=True))
 
 
 def display_prompts(show_full: bool = False, as_json: bool = False):

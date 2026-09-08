@@ -49,9 +49,9 @@ class Settings(BaseSettings):
     slack_test_channel_id: str | None = Field(default=None, validation_alias="SLACK_TEST_CHANNEL_ID")
 
     # LLM (Anthropic Claude)
-    llm_model_name: str = Field(default="claude-sonnet-4-6", validation_alias="LLM_MODEL_NAME")
+    llm_model_name: str = Field(default="claude-opus-5", validation_alias="LLM_MODEL_NAME")
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
-    llm_max_tokens: int = Field(default=4000, validation_alias="LLM_MAX_TOKENS")
+    llm_max_tokens: int = Field(default=16000, validation_alias="LLM_MAX_TOKENS")
 
     # Observability
     logfire_token: SecretStr | None = Field(default=None, validation_alias="LOGFIRE_TOKEN")
