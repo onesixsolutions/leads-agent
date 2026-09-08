@@ -580,8 +580,12 @@ def test_every_criterion_from_icp_fit_is_rendered():
     html = render_brief_html(make_lead(), make_classification(), version=1)
     for spec in CRITERIA:
         assert html_escape(spec.label) in html, spec.label
-    assert html.count('class="criterion"') == len(CRITERIA)
-    assert html.count('class="gate"') == sum(1 for c in CRITERIA if c.is_gate)
+    # Every criterion gets a detail row...
+    assert html.count('class="crit"') == len(CRITERIA)
+    # ...and every GATE also gets a tile in the at-a-glance scan strip. Only
+    # gates decide a verdict, so only gates belong there.
+    gates = sum(1 for c in CRITERIA if c.is_gate)
+    assert html.count('class="gate"') + html.count('class="gate gate--soft"') == gates
 
 
 def test_brief_contains_the_whole_analysis():
@@ -615,10 +619,13 @@ def test_brief_is_self_contained():
     html = render_brief_html(make_lead(), make_classification(), version=1)
     assert html.startswith("<!doctype html>")
     assert "<style>" in html
-    assert "<script" not in html
     assert "http://" not in html.replace("http://100.79", "")  # no CDN or asset hosts
     assert 'name="viewport"' in html
     assert "noindex" in html
+    # Any script must be inline: a brief is a stored object that has to render
+    # from S3, a file:// copy or a PDF with nothing else available.
+    assert "<script src" not in html
+    assert "<link" not in html
 
 
 def test_untrusted_lead_content_is_escaped():
