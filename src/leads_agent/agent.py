@@ -131,10 +131,13 @@ def agent_factory(
 
 # Effort per stage. Triage is a cheap spam filter; the ICP assessment is where
 # the judgement calls happen and is worth the extra thinking.
+#
+# Only the assessment level is configurable, because it is the only one that
+# reaches for `xhigh` — a level Opus 4.7+ supports but older models reject with
+# a 400 on every request. `low` and `high` are safe everywhere.
 _STAGE_EFFORT: dict[str, str] = {
     "triage": "low",
     "research": "high",
-    "assessment": "xhigh",
 }
 
 
@@ -146,10 +149,11 @@ def _model_settings(settings: Settings, stage: str) -> AnthropicModelSettings:
     rejected (HTTP 400) by the Opus 5 / Sonnet 5 generation. Depth is controlled
     with adaptive thinking plus `anthropic_effort` instead.
     """
+    effort = _STAGE_EFFORT.get(stage) or settings.llm_assessment_effort
     return AnthropicModelSettings(
         max_tokens=settings.llm_max_tokens,
         anthropic_thinking={"type": "adaptive"},
-        anthropic_effort=_STAGE_EFFORT.get(stage, "high"),
+        anthropic_effort=effort,
     )
 
 

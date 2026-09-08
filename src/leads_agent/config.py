@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     llm_model_name: str = Field(default="claude-opus-5", validation_alias="LLM_MODEL_NAME")
     anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
     llm_max_tokens: int = Field(default=16000, validation_alias="LLM_MAX_TOKENS")
+    # Effort for the ICP assessment, the one stage where judgement quality
+    # pays. `xhigh` needs Opus 4.7+; older models (e.g. Sonnet 4.6) reject it
+    # with a 400 on every request, so it must be tunable alongside the model.
+    llm_assessment_effort: str = Field(
+        default="xhigh",
+        validation_alias="LLM_ASSESSMENT_EFFORT",
+        description="low | medium | high | xhigh | max. Use 'high' on models without xhigh.",
+    )
 
     # Web search (research stage)
     # `ddgs` fronts several engines. The duckduckgo backend rate-limits to the
