@@ -249,8 +249,14 @@ def test_card_renders_without_a_brief():
 
 
 def test_full_brief_renders_without_a_brief_or_assessment():
+    """
+    Renders without an assessment. It no longer repeats the card's triage line
+    — that put "GO" directly under "NOT IN ICP" — so it carries only detail.
+    """
     classification = build_classification(label=LeadLabel.ignore, research=False)
-    assert "IGNORE" in format_full_brief(LEAD, classification)
+    brief = format_full_brief(LEAD, classification)
+    assert classification.lead_summary in brief
+    assert "GO" not in brief and "IGNORE" not in brief
 
 
 # --- brief_url ------------------------------------------------------------

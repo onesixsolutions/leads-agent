@@ -210,6 +210,20 @@ name) as `<slug>-<10 hex digits>`. It is stable across re-analysis — that is
 what makes the history accumulate — and it deliberately does not contain the
 contact's email address, because these links get pasted into Slack.
 
+### Link mode
+
+`BRIEFS_LINK_MODE` decides what the Slack card links to:
+
+| Mode | Opens from | Expires |
+|------|-----------|---------|
+| `presigned` (default) | anywhere, nothing needs to be running | **yes** — with the instance-role session token, typically hours |
+| `app` | only where the listener is reachable (the tailnet) | no |
+
+Presigned is the default because it works before the listener is deployed. If
+you need links that survive in Slack scrollback, switch to `app` once the
+listener is published on the tailnet, or presign with static IAM user
+credentials instead of the instance role.
+
 ### URLs
 
 | URL | Serves |

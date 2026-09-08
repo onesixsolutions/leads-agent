@@ -297,14 +297,11 @@ def format_full_brief(
             parts.append(f"*Message:* {msg_preview}")
         parts.append("")
 
-    # Stage 1: intent go/no-go. Binary — no confidence percentage.
-    if classification.label.value == "promising":
-        parts.append("✅ *GO* — genuine inquiry")
-    else:
-        parts.append("🚫 *IGNORE* — not a genuine inquiry")
-    parts.append(f"_{classification.reason}_")
+    # The card above already carries the triage line and the verdict. Repeating
+    # them here put "✅ GO" directly beneath "⛔ NOT IN ICP", which reads as a
+    # contradiction; the brief starts where the card stops.
 
-    # Stage 2: ICP verdict, with the criteria that produced it.
+    # ICP verdict detail: the criteria that produced it.
     verdict = getattr(classification, "icp_verdict", None)
     if verdict is not None and verdict != ICPVerdict.not_evaluated:
         emoji, label = verdict_display(verdict)
@@ -480,6 +477,13 @@ def post_to_slack(
     response = client.chat_postMessage(**kwargs)
 
     if not has_full_brief(processed.classification):
+        return
+
+    # The hosted brief is the document; the card links to it. Posting the same
+    # content again as thread chunks would duplicate it and, at four messages
+    # per lead, drown the thread. Thread text is the fallback for when briefs
+    # are not configured.
+    if brief_url:
         return
 
     detail = processed.full_brief or format_full_brief(

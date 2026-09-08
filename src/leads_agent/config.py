@@ -96,6 +96,24 @@ class Settings(BaseSettings):
         validation_alias="BRIEFS_S3_REGION",
         description="Region for the S3 client; falls back to the boto3/AWS default when unset.",
     )
+    briefs_link_mode: str = Field(
+        default="presigned",
+        validation_alias="BRIEFS_LINK_MODE",
+        description=(
+            "presigned = a signed S3 link that works anywhere with no server; "
+            "app = a stable /briefs/<id> URL served by this app (needs the "
+            "listener reachable, e.g. over the tailnet)."
+        ),
+    )
+    briefs_presigned_ttl_s: int = Field(
+        default=604800,
+        validation_alias="BRIEFS_PRESIGNED_TTL_S",
+        description=(
+            "Requested lifetime of a presigned link (max 7 days). NOTE: when "
+            "credentials come from an instance role the URL dies with the "
+            "session token, typically within hours, regardless of this value."
+        ),
+    )
     briefs_base_url: str | None = Field(
         default=None,
         validation_alias="BRIEFS_BASE_URL",
@@ -223,6 +241,7 @@ def display_config():
     table.add_row("BRIEFS_S3_BUCKET", settings.briefs_s3_bucket or "(not set)")
     table.add_row("BRIEFS_S3_PREFIX", settings.briefs_s3_prefix)
     table.add_row("BRIEFS_S3_REGION", settings.briefs_s3_region or "(boto3 default)")
+    table.add_row("BRIEFS_LINK_MODE", settings.briefs_link_mode)
     table.add_row(
         "BRIEFS_BASE_URL",
         settings.briefs_base_url

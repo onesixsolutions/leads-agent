@@ -90,9 +90,62 @@ def _s3_client(settings: Settings) -> Any | None:
         return None
 
     kwargs: dict[str, Any] = {}
-    if settings.briefs_s3_region:
-        kwargs["region_name"] = settings.briefs_s3_region
+    region = settings.briefs_s3_region
+    if region:
+        kwargs["region_name"] = region
+        # Presigning against the global endpoint makes S3 answer 307 and
+        # redirect to the regional host, which invalidates the signature.
+        # Pinning the regional endpoint and SigV4 keeps signed links working.
+        kwargs["endpoint_url"] = f"https://s3.{region}.amazonaws.com"
+    try:
+        from botocore.client import Config
+
+        kwargs["config"] = Config(signature_version="s3v4")
+    except ImportError:  # pragma: no cover - botocore ships with boto3
+        pass
     return boto3.client("s3", **kwargs)
+
+
+def _brief_link(
+    settings: Settings,
+    store: BriefStore,
+    lead_id: str,
+    s3_key: str,
+    base_url: str | None,
+) -> str:
+    """
+    The URL that goes on the Slack card.
+
+    `presigned` works from anywhere with nothing running, at the cost of
+    expiring. `app` is stable but only resolves where the listener is
+    reachable. Falls back to the app path if signing fails, so a link problem
+    never costs us the brief.
+    """
+    if settings.briefs_link_mode == "presigned":
+        try:
+            return store.client.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": store.bucket,
+                    "Key": s3_key,
+                    # Without this S3 serves the object as a download rather
+                    # than rendering it in the browser.
+                    "ResponseContentType": "text/html; charset=utf-8",
+                },
+                ExpiresIn=settings.briefs_presigned_ttl_s,
+            )
+        except Exception:
+            logger.exception("Could not presign the brief; falling back to the app URL")
+
+    path = brief_path(lead_id)
+    if not base_url:
+        logger.warning(
+            "BRIEFS_BASE_URL is not set; brief link is relative (%s) and will "
+            "not be clickable from Slack",
+            path,
+        )
+        return path
+    return absolute_url(base_url, path)
 
 
 def brief_store(settings: Settings, client: Any | None = None) -> BriefStore | None:
@@ -225,14 +278,7 @@ def publish_brief(
             or None,
         )
 
-        path = brief_path(lead_id)
-        url = absolute_url(base_url, path) if base_url else path
-        if not base_url:
-            logger.warning(
-                "BRIEFS_BASE_URL is not set; brief link is relative (%s) and will "
-                "not be clickable from Slack",
-                path,
-            )
+        url = _brief_link(settings, store, lead_id, s3_key, base_url)
 
         logger.info("Published brief %s v%s -> s3://%s/%s", lead_id, published_version, store.bucket, s3_key)
         return BriefRef(lead_id=lead_id, version=published_version, url=url, s3_key=s3_key)

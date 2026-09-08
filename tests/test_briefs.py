@@ -654,3 +654,62 @@ def test_brief_renders_without_an_icp_assessment():
 def test_history_page_handles_an_empty_lead():
     html = render_history_html("acme-1234567890", [])
     assert "No briefs have been published" in html
+
+
+# --- link mode -------------------------------------------------------------
+
+
+def test_presigned_link_mode_signs_the_html_object(monkeypatch):
+    """
+    The Slack card must carry a link that opens with nothing running. The
+    app-served path only resolves on the tailnet, so presigned is the default.
+    """
+    from leads_agent.briefs import publish_brief
+
+    client = FakeS3()
+    calls: list[dict] = []
+
+    def fake_presign(op, Params, ExpiresIn):  # noqa: N803 - boto3 kwarg names
+        calls.append({"op": op, "params": Params, "ttl": ExpiresIn})
+        return "https://s3.us-west-2.amazonaws.com/signed?X-Amz-Signature=abc"
+
+    client.generate_presigned_url = fake_presign
+    settings = make_settings(briefs_link_mode="presigned")
+
+    ref = publish_brief(make_lead(), make_classification(), settings=settings, client=client)
+
+    assert ref is not None
+    assert ref.url.startswith("https://s3.")
+    assert "X-Amz-Signature" in ref.url
+    assert calls[0]["op"] == "get_object"
+    assert calls[0]["params"]["Key"] == ref.s3_key
+    # Without an explicit content type S3 serves it as a download.
+    assert calls[0]["params"]["ResponseContentType"].startswith("text/html")
+
+
+def test_app_link_mode_uses_the_stable_path():
+    from leads_agent.briefs import publish_brief
+
+    settings = make_settings(briefs_link_mode="app")
+    ref = publish_brief(make_lead(), make_classification(), settings=settings, client=FakeS3())
+
+    assert ref is not None
+    assert ref.url.endswith(f"/briefs/{ref.lead_id}")
+    assert "X-Amz" not in ref.url
+
+
+def test_a_signing_failure_still_yields_a_usable_brief(monkeypatch):
+    """A link problem must never cost us the stored brief."""
+    from leads_agent.briefs import publish_brief
+
+    client = FakeS3()
+
+    def boom(*a, **k):
+        raise RuntimeError("no credentials for signing")
+
+    client.generate_presigned_url = boom
+    ref = publish_brief(
+        make_lead(), make_classification(), settings=make_settings(briefs_link_mode="presigned"), client=client
+    )
+    assert ref is not None
+    assert ref.url.endswith(f"/briefs/{ref.lead_id}")
