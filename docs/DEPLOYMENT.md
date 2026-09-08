@@ -163,6 +163,20 @@ docker compose logs -f primary
 
 ## Lead Briefs (HTML pages in S3)
 
+> **Provisioned and verified** — `us-west-2`, bucket **`onesix-leads-agent`**.
+> Public access fully blocked, SSE-S3 default encryption, versioning enabled as
+> a backstop, tagged `contains-pii=true`.
+>
+> The EC2 instance role **`strong-automation`** was tested against it and
+> already grants everything the app needs — `PutObject`, `GetObject`,
+> `HeadObject`, `ListBucket`. Critically, a request for a **missing** key
+> returns `404` rather than `403`, which is what lets the version allocator
+> distinguish a free slot from a permission error. **No IAM change is required.**
+>
+> Briefs name and characterise real people, so publish the port on the tailnet
+> via `BRIEFS_BIND_ADDR`, never on a public interface.
+
+
 The Slack card carries the decision; the **brief** carries the evidence — the
 full ICP assessment, the judgement layer and the research, as a styled HTML
 page. Every analysis is stored as a new version, so you can always go back and
@@ -324,8 +338,8 @@ noncurrent versions, as there are none.
 ```bash
 # .env on the server
 BRIEFS_ENABLED=true
-BRIEFS_S3_BUCKET=onesix-leads-agent-briefs
-BRIEFS_S3_REGION=us-east-1
+BRIEFS_S3_BUCKET=onesix-leads-agent
+BRIEFS_S3_REGION=us-west-2
 BRIEFS_BASE_URL=http://100.79.160.6:8080
 BRIEFS_BIND_ADDR=100.79.160.6
 ```
