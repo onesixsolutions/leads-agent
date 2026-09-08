@@ -1,5 +1,6 @@
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rich import print as rprint
@@ -63,6 +64,38 @@ def extract_leads_from_events(events: list[dict]) -> Iterable[tuple[dict, HubSpo
             yield event, lead
 
 
+def list_leads(events: list[dict]) -> None:
+    """
+    Print an indexed table of the leads in `events` without classifying them.
+
+    Costs nothing — no LLM calls, no searches. The printed index is what
+    `--index` selects, and the timestamp is what `--ts` selects.
+    """
+    rows = list(extract_leads_from_events(events))
+    if not rows:
+        print("No HubSpot leads found.")
+        return
+
+    print(f"{'#':<5}{'Date':<18}{'Name':<24}{'Email':<36}Message")
+    print("-" * 120)
+    for i, (event, lead) in enumerate(rows, start=1):
+        ts = event.get("ts", "")
+        try:
+            # Slack ts is epoch seconds; show it in the operator's local time.
+            when = (
+                datetime.fromtimestamp(float(ts), tz=UTC)
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M")
+            )
+        except (TypeError, ValueError):
+            when = "?"
+        name = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "(no name)"
+        preview = " ".join((lead.message or lead.raw_text or "").split())[:52]
+        print(f"{i:<5}{when:<18}{name[:23]:<24}{(lead.email or '-')[:35]:<36}{preview}")
+    print("-" * 120)
+    print(f"{len(rows)} leads. Select with --index N (repeatable) or --ts <slack_ts>.")
+
+
 def run_backtest(
     events_file: str | Path | None,
     settings: Settings | None = None,
@@ -71,6 +104,9 @@ def run_backtest(
     debug: bool = False,
     verbose: bool = False,
     channel_id: str | None = None,
+    indices: list[int] | None = None,
+    timestamps: list[str] | None = None,
+    list_only: bool = False,
 ) -> None:
     """
     Run classification on leads from a collected events file or Slack history.
@@ -83,6 +119,9 @@ def run_backtest(
         debug: Show debug output
         verbose: Show full message history (with debug)
         channel_id: Slack channel ID to pull history from if no file is provided
+        indices: 1-based lead positions to process (as shown by `list_only`)
+        timestamps: Slack message timestamps to process (stable across pulls)
+        list_only: Print the indexed lead list and return without classifying
     """
     if settings is None:
         settings = get_settings()
@@ -101,21 +140,48 @@ def run_backtest(
         source_channel = channel_id or settings.slack_channel_id or "unknown"
         print(f"Loaded {len(events)} messages from Slack ({source_channel})\n")
 
+    if list_only:
+        list_leads(events)
+        return
+
+    wanted_idx = set(indices or [])
+    wanted_ts = set(timestamps or [])
+    selecting = bool(wanted_idx or wanted_ts)
+
     modes = []
     if debug:
         modes.append("debug")
     mode_str = f" ({', '.join(modes)})" if modes else ""
-    limit_str = f" (limit: {limit})" if limit else ""
+    if selecting:
+        picks = [f"#{i}" for i in sorted(wanted_idx)] + [f"ts={t}" for t in sorted(wanted_ts)]
+        limit_str = f" (selected: {', '.join(picks)})"
+    else:
+        limit_str = f" (limit: {limit})" if limit else ""
     print(f"Backtesting HubSpot leads{mode_str}{limit_str}\n")
 
     count = 0
+    seen = 0
+    matched_idx: set[int] = set()
+    matched_ts: set[str] = set()
     for event, lead in extract_leads_from_events(events):
-        if limit and count >= limit:
+        seen += 1
+        lead_ts = str(event.get("ts", ""))
+
+        if selecting:
+            # Skip anything not explicitly asked for. `seen` is the same
+            # 1-based index that `--list` prints.
+            if seen in wanted_idx:
+                matched_idx.add(seen)
+            elif lead_ts in wanted_ts:
+                matched_ts.add(lead_ts)
+            else:
+                continue
+        elif limit and count >= limit:
             break
 
         count += 1
         print("=" * 60)
-        print(f"[{count}] Processing lead...")
+        print(f"[{seen}] Processing lead...")
 
         if debug:
             print(f"    Input: {lead.first_name} {lead.last_name} <{lead.email}>")
@@ -199,8 +265,19 @@ def run_backtest(
                 print(f"\n📝 Summary: {classification.research_summary}")
 
     print("=" * 60)
+    if selecting:
+        missing_idx = sorted(wanted_idx - matched_idx)
+        missing_ts = sorted(wanted_ts - matched_ts)
+        if missing_idx:
+            print(f"[WARN] No lead at index: {', '.join(str(i) for i in missing_idx)} (found {seen} leads)")
+        if missing_ts:
+            print(f"[WARN] No lead with ts: {', '.join(missing_ts)}")
+
     if count == 0:
-        print("No HubSpot leads found in events file.")
-        print("Make sure the file contains HubSpot bot messages.")
+        if selecting:
+            print("Nothing matched the selection. Run with --list to see available leads.")
+        else:
+            print("No HubSpot leads found in events file.")
+            print("Make sure the file contains HubSpot bot messages.")
     else:
-        print(f"\nProcessed {count} leads.")
+        print(f"\nProcessed {count} lead(s) of {seen} found.")
