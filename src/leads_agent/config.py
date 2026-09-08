@@ -67,6 +67,48 @@ class Settings(BaseSettings):
         description="Per-request search timeout; ddgs defaults to 5s, which is too short.",
     )
 
+    # Lead briefs (HTML brief in S3, served over HTTP)
+    briefs_enabled: bool = Field(
+        default=False,
+        validation_alias="BRIEFS_ENABLED",
+        description="Master switch. Off by default so an unconfigured deploy behaves exactly as before.",
+    )
+    briefs_s3_bucket: str | None = Field(
+        default=None,
+        validation_alias="BRIEFS_S3_BUCKET",
+        description="Bucket the briefs are written to. Credentials come from the default boto3 chain, never from here.",
+    )
+    briefs_s3_prefix: str = Field(
+        default="briefs",
+        validation_alias="BRIEFS_S3_PREFIX",
+        description="Key prefix inside the bucket, so a shared bucket can hold other things.",
+    )
+    briefs_s3_region: str | None = Field(
+        default=None,
+        validation_alias="BRIEFS_S3_REGION",
+        description="Region for the S3 client; falls back to the boto3/AWS default when unset.",
+    )
+    briefs_base_url: str | None = Field(
+        default=None,
+        validation_alias="BRIEFS_BASE_URL",
+        description="Public origin the briefs are reachable at, e.g. http://100.79.160.6:8080. Required for links to be clickable from Slack.",
+    )
+    briefs_http_enabled: bool = Field(
+        default=True,
+        validation_alias="BRIEFS_HTTP_ENABLED",
+        description="Whether to run the brief HTTP listener. Off means publish-only (something else serves the bucket).",
+    )
+    briefs_http_host: str = Field(
+        default="0.0.0.0",
+        validation_alias="BRIEFS_HTTP_HOST",
+        description="Bind address inside the container. Exposure is decided by which host address the port is published on, not here.",
+    )
+    briefs_http_port: int = Field(
+        default=8080,
+        validation_alias="BRIEFS_HTTP_PORT",
+        description="Listener port. 80 and 5678 are taken by other containers on the current host.",
+    )
+
     # Observability
     logfire_token: SecretStr | None = Field(default=None, validation_alias="LOGFIRE_TOKEN")
 
@@ -81,6 +123,24 @@ class Settings(BaseSettings):
     def search_backend_list(self) -> tuple[str, ...]:
         """`search_backends` parsed into an ordered tuple of engine names."""
         return tuple(b.strip() for b in self.search_backends.split(",") if b.strip())
+
+    def briefs_effective_base_url(self) -> str | None:
+        """
+        The origin to build brief links from.
+
+        Prefers the explicitly configured `BRIEFS_BASE_URL`, because the bind
+        address inside a container says nothing about how the outside world
+        reaches it. Falls back to host:port only when the bind host is a
+        concrete address — a wildcard bind (`0.0.0.0`) cannot be turned into a
+        URL anyone else can use.
+        """
+        if self.briefs_base_url:
+            return self.briefs_base_url.rstrip("/")
+        host = (self.briefs_http_host or "").strip()
+        if not host or host in ("0.0.0.0", "::", "*"):
+            return None
+        bracketed = f"[{host}]" if ":" in host else host
+        return f"http://{bracketed}:{self.briefs_http_port}"
 
     def require_slack_socket_mode(self) -> "Settings":
         """Validate settings required for Socket Mode."""
@@ -150,6 +210,19 @@ def display_config():
     table.add_row("LLM_MAX_TOKENS", str(settings.llm_max_tokens))
     table.add_row("SEARCH_BACKENDS", settings.search_backends)
     table.add_row("SEARCH_TIMEOUT_S", str(settings.search_timeout_s))
+    table.add_row("BRIEFS_ENABLED", str(settings.briefs_enabled))
+    # Square brackets are rich markup, so these fallbacks use parentheses.
+    table.add_row("BRIEFS_S3_BUCKET", settings.briefs_s3_bucket or "(not set)")
+    table.add_row("BRIEFS_S3_PREFIX", settings.briefs_s3_prefix)
+    table.add_row("BRIEFS_S3_REGION", settings.briefs_s3_region or "(boto3 default)")
+    table.add_row(
+        "BRIEFS_BASE_URL",
+        settings.briefs_base_url
+        or f"(derived: {settings.briefs_effective_base_url() or 'none - links will be relative'})",
+    )
+    table.add_row("BRIEFS_HTTP_ENABLED", str(settings.briefs_http_enabled))
+    table.add_row("BRIEFS_HTTP_HOST", settings.briefs_http_host)
+    table.add_row("BRIEFS_HTTP_PORT", str(settings.briefs_http_port))
     table.add_row("LOGFIRE_TOKEN", mask_secret(settings.logfire_token))
     table.add_row("DRY_RUN", str(settings.dry_run))
     table.add_row("DEBUG", str(settings.debug))

@@ -148,12 +148,29 @@ def test_transient_failure_recovers_on_retry(monkeypatch, sleeps):
 # --- backoff -------------------------------------------------------------
 
 
-def test_backoff_is_exponential_not_linear():
+def test_backoff_is_exponential_not_linear(monkeypatch):
+    """
+    Jitter is checked separately; here it is pinned to zero so the growth
+    assertion is deterministic. Comparing jittered samples is flaky — a high
+    sample at attempt 1 can legitimately exceed a low one at attempt 2.
+    """
+    monkeypatch.setattr(S.random, "uniform", lambda a, b: 0.0)
     delays = [S.backoff_delay(a, rate_limited=False) for a in range(1, 4)]
-    for attempt, delay in enumerate(delays, start=1):
+
+    assert delays == [
+        min(S.BACKOFF_BASE_S * (2 ** (a - 1)), S.BACKOFF_CAP_S) for a in range(1, 4)
+    ]
+    # Doubling, not the old linear 1.5s/3.0s ramp.
+    assert delays[1] == delays[0] * 2
+    assert delays[2] == delays[1] * 2
+
+
+def test_backoff_stays_within_its_jitter_band():
+    for attempt in range(1, 4):
         nominal = min(S.BACKOFF_BASE_S * (2 ** (attempt - 1)), S.BACKOFF_CAP_S)
-        assert nominal * 0.7 <= delay <= nominal * 1.3
-    assert delays[1] > delays[0] * 1.5
+        for _ in range(50):
+            delay = S.backoff_delay(attempt, rate_limited=False)
+            assert nominal * (1 - S.JITTER) <= delay <= nominal * (1 + S.JITTER)
 
 
 def test_backoff_capped_and_ratelimit_weighted():

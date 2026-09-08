@@ -30,7 +30,9 @@ USER appuser
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# No EXPOSE needed - Socket Mode uses outbound WebSocket only
+# Socket Mode is outbound-only; this port serves lead briefs (see docs/DEPLOYMENT.md).
+# Documentation only - docker-compose decides whether and where it is published.
+EXPOSE 8080
 
 # Health check - verify the process is running
 # (Socket Mode doesn't have an HTTP endpoint to check)

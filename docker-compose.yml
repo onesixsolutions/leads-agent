@@ -5,4 +5,15 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    # No ports needed - Socket Mode uses outbound WebSocket connections
+    # Socket Mode itself needs no inbound port. The published port below only
+    # exists to serve lead briefs (/briefs/<lead_id>).
+    #
+    # BRIEFS_BIND_ADDR decides who can reach them and defaults to loopback, so
+    # an unconfigured host exposes nothing. On the Tailscale host, set it to
+    # the tailnet address (e.g. 100.79.160.6) in .env — briefs name individuals
+    # and judge them, so they should not be on the public internet.
+    #
+    # Port 8080 is chosen because 80 (strongbot) and 5678 (n8n) are already
+    # taken on the current host.
+    ports:
+      - "${BRIEFS_BIND_ADDR:-127.0.0.1}:${BRIEFS_HTTP_PORT:-8080}:${BRIEFS_HTTP_PORT:-8080}"

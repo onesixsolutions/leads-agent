@@ -1,8 +1,9 @@
 """
 Console rendering of an ICP assessment.
 
-Shared by `backtest` and `classify` so the two views cannot drift. The Slack
-view lives in `core.processor.format_slack_message`.
+Shared by `backtest` and `classify` so the two views cannot drift. Slack gets
+a short card (`core.processor.format_slack_message`) plus a threaded full
+brief; the hosted HTML version lives in `leads_agent.briefs`.
 """
 
 from __future__ import annotations
