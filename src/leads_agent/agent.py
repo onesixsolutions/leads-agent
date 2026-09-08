@@ -146,8 +146,11 @@ def _model_settings(settings: Settings, stage: str) -> AnthropicModelSettings:
 
 def _usage_snapshot(result: Any) -> dict[str, Any]:
     """Best-effort extraction of token usage from pydantic-ai result."""
+    # `usage` is a property in pydantic-ai >=1.x; tolerate the older callable.
     try:
-        usage = result.usage()
+        usage = result.usage
+        if callable(usage):
+            usage = usage()
     except Exception:
         usage = None
     return {

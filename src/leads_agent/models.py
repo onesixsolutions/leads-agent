@@ -90,18 +90,36 @@ class HubSpotLead(BaseModel):
 
         # Pattern: *Field Name*: Value
         # Handle both plain text and Slack markdown links like <mailto:email|email>
-        patterns = {
-            "first_name": r"\*First Name\*:\s*(.+?)(?=\n\*|\n*$)",
-            "last_name": r"\*Last Name\*:\s*(.+?)(?=\n\*|\n*$)",
-            "email": r"\*Email\*:\s*(?:<mailto:[^|]+\|)?([^\s>]+)",
-            "company": r"\*Company\*:\s*(.+?)(?=\n\*|\n*$)",
-            "message": r"\*Message\*:\s*(.+)",
+        #
+        # Single-line fields must not cross a newline: with re.DOTALL an empty
+        # field (e.g. "*Company*:" with nothing after it) would otherwise
+        # swallow the following line, silently loading the message text into
+        # `company` and sending the research stage after a bogus entity.
+        single_line_patterns = {
+            "first_name": r"\*First Name\*:[ \t]*([^\n]*)",
+            "last_name": r"\*Last Name\*:[ \t]*([^\n]*)",
+            "email": r"\*Email\*:[ \t]*(?:<mailto:[^|]+\|)?([^\s>]*)",
+            "company": r"\*Company\*:[ \t]*([^\n]*)",
         }
+        # The message is the one genuinely multi-line field.
+        multi_line_patterns = {"message": r"\*Message\*:[ \t]*(.+)"}
 
-        for field, pattern in patterns.items():
+        for field, pattern in single_line_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                if not value:
+                    continue
+                value = re.sub(r"<mailto:[^|]+\|([^>]+)>", r"\1", value)
+                value = re.sub(r"<[^|]+\|([^>]+)>", r"\1", value)
+                setattr(lead, field, value)
+
+        for field, pattern in multi_line_patterns.items():
             match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
                 value = match.group(1).strip()
+                if not value:
+                    continue
                 # Clean up the value
                 value = re.sub(
                     r"<mailto:[^|]+\|([^>]+)>", r"\1", value

@@ -2,6 +2,8 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from rich import print as rprint
+
 from leads_agent.agent import ClassificationResult, classify_lead
 from leads_agent.config import Settings, get_settings
 from leads_agent.core.history import pull_history
@@ -164,7 +166,9 @@ def run_backtest(
         print(f"{label_emoji} {label_display}")
         print(f"Reason: {reason}")
 
-        print(format_icp_report(classification))
+        report = format_icp_report(classification)
+        if report.strip():
+            rprint(report)
         if getattr(classification, "lead_summary", None):
             print(f"Summary: {classification.lead_summary}")
         if getattr(classification, "key_signals", None):
