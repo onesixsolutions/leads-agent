@@ -4,21 +4,21 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, TypeVar, overload
 
 from pydantic_ai import Agent
-from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
 from leads_agent.config import Settings
+from leads_agent.icp_fit import apply_icp_fit
 from leads_agent.models import EnrichedLeadClassification, HubSpotLead, LeadClassification
 from leads_agent.prompts import get_prompt_manager
+from leads_agent.search import DEFAULT_BACKENDS, DEFAULT_TIMEOUT_S, web_search_tool
 
 TOutput = TypeVar("TOutput")
 
-
 @dataclass
 class ClassificationResult:
-    """Result of triage/scoring pipeline with optional debug info."""
+    """Result of the triage/research/assessment pipeline with optional debug info."""
 
     classification: LeadClassification | EnrichedLeadClassification
     message_history: list[ModelMessage] = field(default_factory=list)
@@ -29,12 +29,13 @@ class ClassificationResult:
         return self.classification.label.value
 
     @property
-    def confidence(self) -> float:
-        return self.classification.confidence
-
-    @property
     def reason(self) -> str:
         return self.classification.reason
+
+    @property
+    def icp_verdict(self) -> str | None:
+        verdict = getattr(self.classification, "icp_verdict", None)
+        return verdict.value if verdict is not None else None
 
     def format_history(self, verbose: bool = False) -> str:
         """Format message history for debugging output."""
@@ -66,7 +67,7 @@ class ClassificationResult:
         print("LEAD PIPELINE DEBUG")
         print("=" * 60)
         print(f"Label: {self.label}")
-        print(f"Confidence: {self.confidence:.2%}")
+        print(f"ICP verdict: {self.icp_verdict or 'n/a'}")
         print(f"Reason: {self.reason}")
         print(f"\nUsage: {self.usage}")
         print(f"\nMessage History ({len(self.message_history)} messages):")
@@ -83,7 +84,9 @@ def agent_factory(
     output_type: type[TOutput],
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
-    use_duckduckgo_search: bool = False,
+    search_budget: int | None = None,
+    search_backends: tuple[str, ...] | None = None,
+    search_timeout_s: int = DEFAULT_TIMEOUT_S,
 ) -> Agent[None, TOutput]: ...
 
 
@@ -95,17 +98,25 @@ def agent_factory(
     output_type: type[TOutput],
     model_settings: AnthropicModelSettings,
     extra_tools: tuple[Callable, ...] | None = None,
-    use_duckduckgo_search: bool = False,
+    search_budget: int | None = None,
+    search_backends: tuple[str, ...] | None = None,
+    search_timeout_s: int = DEFAULT_TIMEOUT_S,
 ) -> Agent[None, TOutput]:
     """
-    Create an agent in a consistent way across triage/research/scoring.
+    Create an agent in a consistent way across triage/research/assessment.
     """
     provider = AnthropicProvider(api_key=llm_api_key)
     model = AnthropicModel(model_name=llm_model_name, provider=provider)
 
     tools: list[Any] = list(extra_tools) if extra_tools else []
-    if use_duckduckgo_search:
-        tools.append(duckduckgo_search_tool())
+    if search_budget:
+        tools.append(
+            web_search_tool(
+                search_budget,
+                backends=search_backends or DEFAULT_BACKENDS,
+                timeout_s=search_timeout_s,
+            )
+        )
 
     return Agent(
         model=model,
@@ -118,10 +129,41 @@ def agent_factory(
     )
 
 
+# Effort per stage. Triage is a cheap spam filter; the ICP assessment is where
+# the judgement calls happen and is worth the extra thinking.
+#
+# Only the assessment level is configurable, because it is the only one that
+# reaches for `xhigh` — a level Opus 4.7+ supports but older models reject with
+# a 400 on every request. `low` and `high` are safe everywhere.
+_STAGE_EFFORT: dict[str, str] = {
+    "triage": "low",
+    "research": "high",
+}
+
+
+def _model_settings(settings: Settings, stage: str) -> AnthropicModelSettings:
+    """
+    Build per-stage model settings.
+
+    Note: `temperature`, `top_p`, `top_k` and thinking `budget_tokens` are all
+    rejected (HTTP 400) by the Opus 5 / Sonnet 5 generation. Depth is controlled
+    with adaptive thinking plus `anthropic_effort` instead.
+    """
+    effort = _STAGE_EFFORT.get(stage) or settings.llm_assessment_effort
+    return AnthropicModelSettings(
+        max_tokens=settings.llm_max_tokens,
+        anthropic_thinking={"type": "adaptive"},
+        anthropic_effort=effort,
+    )
+
+
 def _usage_snapshot(result: Any) -> dict[str, Any]:
     """Best-effort extraction of token usage from pydantic-ai result."""
+    # `usage` is a property in pydantic-ai >=1.x; tolerate the older callable.
     try:
-        usage = result.usage()
+        usage = result.usage
+        if callable(usage):
+            usage = usage()
     except Exception:
         usage = None
     return {
@@ -138,30 +180,34 @@ def _create_triage_agent(settings: Settings, api_key: str) -> Agent[None, LeadCl
         llm_api_key=api_key,
         instructions=pm.build_triage_prompt(),
         output_type=LeadClassification,
-        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
+        model_settings=_model_settings(settings, "triage"),
     )
 
 
-def _create_research_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
+def _create_research_agent(
+    settings: Settings, api_key: str, max_searches: int = 4
+) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_model_name=settings.llm_model_name,
         llm_api_key=api_key,
         instructions=pm.build_research_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
-        use_duckduckgo_search=True,
+        model_settings=_model_settings(settings, "research"),
+        search_budget=max_searches,
+        search_backends=settings.search_backend_list,
+        search_timeout_s=settings.search_timeout_s,
     )
 
 
-def _create_scoring_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
+def _create_assessment_agent(settings: Settings, api_key: str) -> Agent[None, EnrichedLeadClassification]:
     pm = get_prompt_manager()
     return agent_factory(
         llm_model_name=settings.llm_model_name,
         llm_api_key=api_key,
-        instructions=pm.build_scoring_prompt(),
+        instructions=pm.build_icp_assessment_prompt(),
         output_type=EnrichedLeadClassification,
-        model_settings=AnthropicModelSettings(temperature=0.0, max_tokens=settings.llm_max_tokens),
+        model_settings=_model_settings(settings, "assessment"),
     )
 
 
@@ -174,7 +220,10 @@ def classify_lead(
 ) -> LeadClassification | EnrichedLeadClassification | ClassificationResult:
     """
     Classify a HubSpot lead using a multi-stage pipeline:
-    triage → (if promising) web research → (if promising) final 1–5 scoring.
+    triage → (if promising) web research → (if promising) ICP assessment.
+
+    The ICP verdict is derived from the assessment's criteria in
+    `icp_fit`, not chosen by the model.
     """
     api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
 
@@ -200,7 +249,7 @@ def classify_lead(
         if research_usage:
             usage["research"] = research_usage
 
-        scored, scoring_msgs, scoring_usage = _score_lead(
+        scored, assessment_msgs, assessment_usage = _assess_lead(
             settings,
             lead,
             triage=triage,
@@ -208,10 +257,10 @@ def classify_lead(
             return_debug=True,
         )
         final = scored
-        if scoring_msgs:
-            message_history.extend(scoring_msgs)
-        if scoring_usage:
-            usage["scoring"] = scoring_usage
+        if assessment_msgs:
+            message_history.extend(assessment_msgs)
+        if assessment_usage:
+            usage["assessment"] = assessment_usage
 
     if debug:
         return ClassificationResult(
@@ -230,7 +279,7 @@ def _research_lead(
     return_debug: bool = False,
 ) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
     api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
-    research_agent = _create_research_agent(settings, api_key)
+    research_agent = _create_research_agent(settings, api_key, max_searches=max_searches)
 
     email_domain = ""
     if lead.email and "@" in lead.email:
@@ -255,7 +304,6 @@ Original message:
 
 Triage classification:
 - Label: {classification.label.value}
-- Confidence: {classification.confidence:.0%}
 - Reason: {classification.reason}
 
 Research plan:
@@ -285,18 +333,17 @@ Return an enriched classification with your research findings.
             email=classification.email,
             company=classification.company,
             label=classification.label,
-            confidence=classification.confidence,
             reason=classification.reason,
             lead_summary=classification.lead_summary,
             key_signals=classification.key_signals,
             research_summary=f"Research failed: {e}",
         )
         if return_debug:
-            return fallback, [], {"error": str(e)}
-        return fallback
+            return apply_icp_fit(fallback), [], {"error": str(e)}
+        return apply_icp_fit(fallback)
 
 
-def _score_lead(
+def _assess_lead(
     settings: Settings,
     lead: HubSpotLead,
     *,
@@ -305,14 +352,14 @@ def _score_lead(
     return_debug: bool = False,
 ) -> EnrichedLeadClassification | tuple[EnrichedLeadClassification, list[ModelMessage], dict[str, Any]]:
     api_key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
-    scoring_agent = _create_scoring_agent(settings, api_key)
+    assessment_agent = _create_assessment_agent(settings, api_key)
 
     name = f"{lead.first_name or ''} {lead.last_name or ''}".strip()
     email_domain = ""
     if lead.email and "@" in lead.email:
         email_domain = lead.email.split("@")[1]
 
-    scoring_input = f"""
+    assessment_input = f"""
 Lead:
 - Name: {name or "Unknown"}
 - Email: {lead.email or "Unknown"} (domain: {email_domain or "Unknown"})
@@ -321,7 +368,6 @@ Lead:
 
 Triage output:
 - label: {triage.label.value}
-- confidence: {triage.confidence:.0%}
 - reason: {triage.reason}
 - lead_summary: {triage.lead_summary or "N/A"}
 - key_signals: {", ".join(triage.key_signals or []) or "N/A"}
@@ -331,8 +377,10 @@ Research output (if any):
 {enriched.model_dump_json(indent=2, exclude_none=True) if enriched is not None else "None"}
 """
 
-    run = scoring_agent.run_sync(scoring_input)
-    output = run.output
+    run = assessment_agent.run_sync(assessment_input)
+    # The model supplies criteria + brief; the verdict/action are derived here so
+    # identical evidence always yields an identical decision.
+    output = apply_icp_fit(run.output)
     if return_debug:
         return output, run.all_messages(), _usage_snapshot(run)
     return output
@@ -353,9 +401,9 @@ def enrich_lead(
     *,
     max_searches: int = 4,
 ) -> EnrichedLeadClassification:
-    """Run research + scoring on a promising lead (call after triage_lead)."""
+    """Run research + ICP assessment on a promising lead (call after triage_lead)."""
     enriched, _, _ = _research_lead(settings, lead, triage, max_searches=max_searches, return_debug=True)
-    scored, _, _ = _score_lead(settings, lead, triage=triage, enriched=enriched, return_debug=True)
+    scored, _, _ = _assess_lead(settings, lead, triage=triage, enriched=enriched, return_debug=True)
     return scored
 
 

@@ -1,6 +1,6 @@
 # Architecture Guide
 
-How Leads Agent works — from lead submission to classification, research, and scoring.
+How Leads Agent works — from lead submission to classification, research, and ICP assessment.
 
 ---
 
@@ -9,17 +9,33 @@ How Leads Agent works — from lead submission to classification, research, and 
 Leads Agent is a Slack bot that:
 1. Listens for HubSpot lead notifications via **Socket Mode** (WebSocket)
 2. Parses contact info from the message
-3. Runs a multi-stage LLM pipeline: **triage → research → scoring**
+3. Runs a multi-stage LLM pipeline: **triage → research → ICP assessment**
 4. Posts results as a threaded reply
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   HubSpot   │────▶│    Slack    │────▶│ Leads Agent  │────▶│   OpenAI    │
-│  Workflow   │     │   Channel   │     │ (Socket Mode)│     │    LLM      │
+│   HubSpot   │────▶│    Slack    │────▶│ Leads Agent  │────▶│   Claude    │
+│  Workflow   │     │   Channel   │     │ (Socket Mode)│     │  (Opus 5)   │
 └─────────────┘     └─────────────┘     └──────────────┘     └─────────────┘
-     Form            Bot message          Filter & parse     Triage → Research
-   submission        with lead data       HubSpot messages   → Score → Post
+     Form            Bot message          Filter & parse    Triage → Research
+   submission        with lead data       HubSpot messages  → ICP assess → Post
 ```
+
+### The two-layer decision
+
+The pipeline deliberately separates **evidence** from **judgement**, and separates
+both from the **decision**:
+
+| Layer | Produced by | Contains |
+|-------|-------------|----------|
+| Criteria | LLM (`ICPAssessment`) | Ten fixed ICP tests, each `met`/`not_met`/`partial`/`unknown` with a finding and its evidence |
+| Verdict | **Code** (`icp_fit.derive_verdict`) | `in_icp` / `partial_fit` / `needs_verification` / `out_of_icp`, plus why-in / why-out / open-questions |
+| Judgement | LLM (`OutreachBrief`) | The analyst's read, upside, risks, and any named exception case |
+
+The verdict is derived in Python, never chosen by the model, so identical
+evidence always produces an identical decision and every rejection names the
+criterion that caused it. `unknown` is a first-class status: absent evidence
+yields `needs_verification`, never a rejection.
 
 ---
 
@@ -32,6 +48,8 @@ Leads Agent is a Slack bot that:
 | **Agent** | `agent.py` | Multi-stage LLM pipeline with pydantic-ai agents |
 | **Models** | `models.py` | `HubSpotLead`, `LeadClassification`, `EnrichedLeadClassification` |
 | **Prompts** | `prompts/` | Prompt configuration, ICP settings, customizable instructions |
+| **ICP fit** | `icp_fit.py` | Deterministic verdict derivation from assessment criteria |
+| **ICP report** | `core/icp_report.py` | Console rendering of the assessment (backtest, classify) |
 | **Slack** | `slack.py` | Slack WebClient wrapper for posting messages |
 | **Config** | `config.py` | Environment/`.env` settings via pydantic-settings |
 | **CLI** | `cli.py` | Commands: `init`, `run`, `collect`, `backtest`, `test`, `classify`, `pull-history`, `replay` |
@@ -124,8 +142,8 @@ The `agent.py` module implements a three-stage pipeline using pydantic-ai:
 │         │                                           │              │
 │         ▼                                           │              │
 │  ┌─────────────┐                                    │              │
-│  │  SCORING    │  1-5 score + recommended action   │              │
-│  │   Agent     │  Output: EnrichedLeadClassification│              │
+│  │ ICP ASSESS  │  Criteria + evidence + brief;      │              │
+│  │   Agent     │  verdict derived in icp_fit.py      │              │
 │  └──────┬──────┘                                    │              │
 │         │                                           │              │
 │         ▼                                           ▼              │
@@ -136,7 +154,12 @@ The `agent.py` module implements a three-stage pipeline using pydantic-ai:
 
 #### Stage 1: Triage Agent
 
-Fast classification to filter obvious spam/noise:
+Fast classification to filter obvious spam/noise.
+
+Triage decides **intent only** — never fit. A genuine inquiry from a company
+we would never sell to is still `promising` here, because the ICP stage is what
+judges fit and it does so with visible evidence. There is no confidence
+percentage: the decision is binary.
 
 ```python
 class LeadClassification(BaseModel):
@@ -144,11 +167,10 @@ class LeadClassification(BaseModel):
     last_name: str | None
     email: str | None
     company: str | None          # Extracted from message or email domain
-    label: LeadLabel             # ignore | promising
-    confidence: float            # 0.0–1.0
+    label: LeadLabel             # ignore | promising  (binary go/no-go)
     reason: str
     lead_summary: str | None     # 1-2 sentence summary
-    key_signals: list[str] | None  # Tags like "budget mentioned", "student project"
+    key_signals: list[str] | None  # Tags like "budget mentioned", "vendor pitch"
 ```
 
 #### Stage 2: Research Agent (Promising Leads Only)
@@ -176,39 +198,71 @@ class ContactResearch(BaseModel):
 2. Search company name for description/industry
 3. Search contact name + company for role/title
 
-#### Stage 3: Scoring Agent (Promising Leads Only)
+#### Stage 3: ICP Assessment Agent (Promising Leads Only)
 
-Produces final score and recommended action:
+Evaluates ten fixed ICP criteria and writes the brief. The overall verdict and
+action are then derived in `icp_fit.py`:
 
 ```python
 class EnrichedLeadClassification(LeadClassification):
     company_research: CompanyResearch | None
     contact_research: ContactResearch | None
     research_summary: str | None
-    score: int | None              # 1-5 scale
-    action: LeadAction | None      # ignore | follow_up | prioritize
-    score_reason: str | None
+
+    # Model-supplied
+    icp_assessment: ICPAssessment | None   # 10 criteria, each with evidence
+    brief: OutreachBrief | None            # judgement layer
+
+    # Derived in icp_fit.py — the model must not set these
+    icp_verdict: ICPVerdict | None         # in_icp | partial_fit
+                                           # | needs_verification | out_of_icp
+    reasons_in_icp: list[str] | None
+    reasons_out_of_icp: list[str] | None
+    open_questions: list[str] | None
+    action: LeadAction | None              # ignore | follow_up
 ```
+
+**Criteria and gates** (`icp_fit.CRITERIA`):
+
+| Criterion | Gate? | Hard? |
+|-----------|-------|-------|
+| Revenue band ($250M–$10B) | yes | yes |
+| Deal shape ($150k+ floor) | yes | yes |
+| Platform trajectory | yes | yes |
+| Entry door | yes | yes |
+| Executive sponsor & budget | yes | no |
+| Thin internal data/ML team | yes | no |
+| Trigger / urgency | no | — |
+| Designed expansion path | no | — |
+| Buyer persona fit | no | — |
+| Focus overlay | no | — |
+
+A gate at `not_met` disqualifies. A **hard** gate at `unknown` yields
+`needs_verification`; a soft gate at `unknown` yields `partial_fit`. Non-gates
+are reported but never change the verdict — the core ICP is horizontal, so an
+off-overlay industry can never reject a lead.
 
 ### 5. Response
 
 If `DRY_RUN=false`, posts a threaded reply:
 
 ```
-✅ *GO* (92%)
-_Genuine infrastructure consulting inquiry_
+✅ *GO* — genuine inquiry
+_Clear data platform modernization inquiry_
 
-⭐ *Score:* 4/5 · *Action:* follow_up
-_Strong ICP fit, decision-maker, clear budget timeline_
+⛔ *NOT IN ICP*
+*$30M regional logistics company, no exec sponsor named, no platform signal —
+no identifiable door, ~$20k ask.*
 
-📊 Company Research:
-• *Acme Corp*: Enterprise software for supply chain management
-• Industry: SaaS / Logistics
-• Website: acme.com
+*Why not in ICP:*
+• Revenue band ($250M–$10B): Self-reported $30M revenue, below the band.
+• Deal shape ($150k+ floor): New logo at ~$20k with no recurring path.
 
-👤 Contact Research:
-• *Jane Smith* - VP of Engineering
-• Leads 50-person engineering team, reports to CTO
+*🧠 Take:* Real problem, wrong size. At $30M they cannot fund a $150k
+foundation build, and the "we'll take it from there internally" framing says
+they want a document, not a partner.
+
+*Action:* `ignore`
 ```
 
 ---
@@ -375,8 +429,8 @@ lead.process
 - `lead_id` — Slack thread_ts or hash of lead data
 - `email` / `email_domain` — Contact info
 - `company` — Extracted company name
-- `label` — Classification result
-- `score` — Final 1-5 score (if promising)
+- `label` — Triage result (intent)
+- `icp_verdict` — Derived ICP determination (if promising)
 
 ---
 
@@ -396,13 +450,20 @@ docker compose up -d --build
 # Required
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
 
 # Optional
-SLACK_CHANNEL_ID=C...      # Filter to specific channel
-DRY_RUN=true               # Don't post replies
-LOGFIRE_TOKEN=...          # Observability
+SLACK_CHANNEL_ID=C...          # Filter to specific channel
+LLM_MODEL_NAME=claude-opus-5   # Default; Opus is used for judgement quality
+LLM_MAX_TOKENS=16000           # Adaptive thinking shares this budget
+DRY_RUN=true                   # Don't post replies
+LOGFIRE_TOKEN=...              # Observability
 ```
+
+> **Model note:** the Opus 5 / Sonnet 5 generation rejects `temperature`,
+> `top_p`, `top_k` and thinking `budget_tokens` with a 400. Depth is set with
+> adaptive thinking plus `anthropic_effort`, per stage, in
+> `agent.py::_model_settings`.
 
 ### Security Checklist
 

@@ -4,8 +4,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from leads_agent.prompts.prompts import (
+    BASE_ICP_ASSESSMENT_PROMPT,
     BASE_RESEARCH_PROMPT,
-    BASE_SCORING_PROMPT,
     BASE_TRIAGE_PROMPT,
 )
 
@@ -212,9 +212,9 @@ class PromptManager:
 
         return "\n".join(parts)
 
-    def build_scoring_prompt(self) -> str:
-        """Build scoring system prompt."""
-        parts = [BASE_SCORING_PROMPT]
+    def build_icp_assessment_prompt(self) -> str:
+        """Build the ICP assessment system prompt."""
+        parts = [BASE_ICP_ASSESSMENT_PROMPT]
         cfg = self.config
 
         # Add ICP context so scoring can incorporate fit.
@@ -248,7 +248,7 @@ class PromptManager:
         if cfg.qualifying_questions:
             questions = "\n".join(f"- {q}" for q in cfg.qualifying_questions)
             parts.append(
-                f"\n--- Qualifying Questions ---\nUse these to justify score/action:\n{questions}"
+                f"\n--- Qualifying Questions ---\nUse these to ground your criteria findings:\n{questions}"
             )
 
         return "\n".join(parts)
@@ -347,12 +347,17 @@ class PromptManager:
         if clause_pack_lines:
             clause_pack = "\n".join(f"- {line}" for line in clause_pack_lines)
             parts.append(
-                "\n--- Query Operator Clause Pack (use in DuckDuckGo queries) ---\n"
-                "Use these to make searches specific. Combine with quoted company/contact names and site: constraints when useful:\n"
+                "\n--- Query Operator Clause Pack (optional refiners) ---\n"
+                "Optional refiners for when a plain query is too noisy. Do NOT stack many of these into "
+                "one query - over-constrained queries are the main cause of zero results:\n"
                 f"{clause_pack}"
             )
 
         return "\n".join(parts)
+
+
+    # Backwards-compatible alias: the scoring stage is now the ICP assessment.
+    build_scoring_prompt = build_icp_assessment_prompt
 
 
 def load_prompt_config_from_file(path: Path | str | None = None) -> PromptConfig:

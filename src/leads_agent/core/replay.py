@@ -103,10 +103,20 @@ def replay(channel_id: str, limit: int, dry_run: bool, max_searches: int, reacti
                         rprint(
                             Panel(
                                 result.slack_message,
-                                title=f"Replay {processed}/{limit}",
+                                title=f"Replay {processed}/{limit} - card",
                                 border_style="yellow",
                             )
                         )
+                        # The card is deliberately short, so show the detail
+                        # that would have gone into the thread reply too.
+                        if result.full_brief:
+                            rprint(
+                                Panel(
+                                    result.full_brief,
+                                    title=f"Replay {processed}/{limit} - full brief",
+                                    border_style="dim",
+                                )
+                            )
                     else:
                         rprint(f"[green]✓[/] Posted replay {processed}/{limit} (thread_ts={ts})")
 

@@ -6,6 +6,7 @@ from rich.logging import RichHandler
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from leads_agent.briefs.server import start_brief_server
 from leads_agent.config import Settings, get_settings
 from leads_agent.core.processor import process_and_post
 from leads_agent.models import HubSpotLead
@@ -46,6 +47,20 @@ def _is_hubspot_message(settings: Settings, event: dict) -> bool:
     if settings.slack_channel_id and event.get("channel") != settings.slack_channel_id:
         return False
     return True
+
+
+def _start_brief_server(settings: Settings) -> None:
+    """
+    Bring up the brief HTTP listener before Socket Mode takes the main thread.
+
+    `SocketModeHandler.start()` never returns, so the listener has to be
+    running (in its own daemon thread) by the time we call it. Failures are
+    already swallowed inside `start_brief_server`: the bot classifies leads
+    whether or not anyone can read the briefs.
+    """
+    if start_brief_server(settings) is not None:
+        base_url = settings.briefs_effective_base_url() or "(BRIEFS_BASE_URL not set)"
+        print(f"  Briefs: {base_url}/briefs/<lead_id>")
 
 
 def create_bolt_app(settings: Settings | None = None) -> App:
@@ -89,7 +104,10 @@ def create_bolt_app(settings: Settings | None = None) -> App:
             thread_ts=event["ts"],
         )
 
-        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+        logger.info(
+            f"Classified: {result.label}"
+            + (f" · ICP: {result.classification.icp_verdict.value}" if getattr(result.classification, "icp_verdict", None) else "")
+        )
 
     @app.event({"type": "message", "subtype": "message_changed"})
     def handle_message_changed(event: dict):
@@ -122,6 +140,7 @@ def run_socket_mode(settings: Settings | None = None) -> None:
     print("\n[STARTUP] Leads Agent")
     print(f"  Channel filter: {settings.slack_channel_id or 'all channels bot is in'}")
     print(f"  Dry run: {settings.dry_run}")
+    _start_brief_server(settings)
     print("\nListening for HubSpot messages... (Ctrl+C to stop)\n")
 
     handler.start()
@@ -173,7 +192,10 @@ def run_test_mode(
             include_lead_info=True,  # Include lead details
         )
 
-        logger.info(f"Classified: {result.label} ({result.classification.confidence:.0%})")
+        logger.info(
+            f"Classified: {result.label}"
+            + (f" · ICP: {result.classification.icp_verdict.value}" if getattr(result.classification, "icp_verdict", None) else "")
+        )
         if not settings.dry_run:
             logger.info(f"Posted to test channel: {target_channel}")
 
@@ -194,6 +216,7 @@ def run_test_mode(
     print(f"  Listening on: {settings.slack_channel_id or 'all channels'}")
     print(f"  Posting to: {target_channel}")
     print(f"  Dry run: {settings.dry_run}")
+    _start_brief_server(settings)
     print("\nWaiting for HubSpot messages... (Ctrl+C to stop)\n")
 
     handler.start()

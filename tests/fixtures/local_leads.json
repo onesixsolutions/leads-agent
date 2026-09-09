@@ -1,0 +1,242 @@
+[
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0001",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0001",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Dana\n*Last Name*: Whitfield\n*Email*: <mailto:dana.whitfield@lincolnelectric.com|dana.whitfield@lincolnelectric.com>\n*Company*: Lincoln Electric\n*Message*: I joined as Chief Data Officer three months ago. We're migrating off an on-prem SQL Server warehouse to Snowflake and I cannot hire a data engineering team fast enough to hit our board's timeline. Looking for a partner to run the foundation build \u2014 budget approved for a first phase around $175k, and we expect this to be the start of a multi-year program.",
+            "text": "*First Name*: Dana\n*Last Name*: Whitfield\n*Email*: <mailto:dana.whitfield@lincolnelectric.com|dana.whitfield@lincolnelectric.com>\n*Company*: Lincoln Electric\n*Message*: I joined as Chief Data Officer three months ago. We're migrating off an on-prem SQL Server warehouse to Snowflake and I cannot hire a data engineering team fast enough to hit our board's timeline. Looking for a partner to run the foundation build \u2014 budget approved for a first phase around $175k, and we expect this to be the start of a multi-year program."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "in_icp",
+      "tests": "Deck qualifying row 1 \u2014 real ~$4B manufacturer, new CDO, Snowflake migration, above floor"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0002",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0002",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Robert\n*Last Name*: Ellison\n*Email*: <mailto:rellison@du.edu|rellison@du.edu>\n*Company*: University of Denver\n*Message*: Our board has mandated an AI strategy for the next academic year. We already run Snowflake for institutional reporting. We want to launch an AI front door for student services \u2014 advising, financial aid, enrollment questions. The provost has committed roughly $200k for phase one and I report to her on this.",
+            "text": "*First Name*: Robert\n*Last Name*: Ellison\n*Email*: <mailto:rellison@du.edu|rellison@du.edu>\n*Company*: University of Denver\n*Message*: Our board has mandated an AI strategy for the next academic year. We already run Snowflake for institutional reporting. We want to launch an AI front door for student services \u2014 advising, financial aid, enrollment questions. The provost has committed roughly $200k for phase one and I report to her on this."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "in_icp",
+      "tests": "Deck qualifying row 2 \u2014 real university, board AI mandate, on Snowflake, $200k phase one"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0003",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0003",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Priya\n*Last Name*: Raghavan\n*Email*: <mailto:p.raghavan@graco.com|p.raghavan@graco.com>\n*Company*: Graco\n*Message*: Interested in booking a two-day LLM workshop for our senior leadership team. Just the workshop for now \u2014 no budget or plan beyond it, we want to get everyone educated first.",
+            "text": "*First Name*: Priya\n*Last Name*: Raghavan\n*Email*: <mailto:p.raghavan@graco.com|p.raghavan@graco.com>\n*Company*: Graco\n*Message*: Interested in booking a two-day LLM workshop for our senior leadership team. Just the workshop for now \u2014 no budget or plan beyond it, we want to get everyone educated first."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "Door gate only: real in-band manufacturer, but enablement wedge with no build intent"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0004",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0004",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Sanjay\n*Last Name*: Iyer\n*Email*: <mailto:sanjay.iyer@costco.com|sanjay.iyer@costco.com>\n*Company*: Costco Wholesale\n*Message*: I'm a director in our supply chain analytics group. Exploring vendors who could help build demand forecasting models for a pilot in one business unit.",
+            "text": "*First Name*: Sanjay\n*Last Name*: Iyer\n*Email*: <mailto:sanjay.iyer@costco.com|sanjay.iyer@costco.com>\n*Company*: Costco Wholesale\n*Message*: I'm a director in our supply chain analytics group. Exploring vendors who could help build demand forecasting models for a pilot in one business unit."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "Band gate: real company far above $10B"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0005",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0005",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Ellen\n*Last Name*: Vasquez\n*Email*: <mailto:evasquez@sterlingpartners.com|evasquez@sterlingpartners.com>\n*Company*: Sterling Partners\n*Message*: I'm an operating partner at Sterling. We have 14 portfolio companies and I'm looking for help scoping a data maturity assessment across three of them \u2014 probably a $40k engagement to start. If it goes well we'd want to standardize a data playbook across the whole portfolio.",
+            "text": "*First Name*: Ellen\n*Last Name*: Vasquez\n*Email*: <mailto:evasquez@sterlingpartners.com|evasquez@sterlingpartners.com>\n*Company*: Sterling Partners\n*Message*: I'm an operating partner at Sterling. We have 14 portfolio companies and I'm looking for help scoping a data maturity assessment across three of them \u2014 probably a $40k engagement to start. If it goes well we'd want to standardize a data playbook across the whole portfolio."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "Floor gate + exception case: real PE firm, small ask, portfolio-wide upside"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0006",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0006",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Jordan\n*Last Name*: Kim\n*Email*: <mailto:jordankim.builds@gmail.com|jordankim.builds@gmail.com>\n*Company*: \n*Message*: Hey! Working on a stealth AI product in the logistics space, pre-seed, just me and a technical cofounder right now. We're exploring options for someone to help architect the data platform before we raise our seed. What do engagements like this typically run?",
+            "text": "*First Name*: Jordan\n*Last Name*: Kim\n*Email*: <mailto:jordankim.builds@gmail.com|jordankim.builds@gmail.com>\n*Company*: \n*Message*: Hey! Working on a stealth AI product in the logistics space, pre-seed, just me and a technical cofounder right now. We're exploring options for someone to help architect the data platform before we raise our seed. What do engagements like this typically run?"
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "NEW RULE \u2014 company unfindable: stealth startup, gmail, no company name"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0007",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0007",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Marcus\n*Last Name*: Feld\n*Email*: <mailto:m.feld@calderwood-industrial-holdings.com|m.feld@calderwood-industrial-holdings.com>\n*Company*: Calderwood Industrial Holdings\n*Message*: We're a diversified industrial holding company and we're looking at consolidating reporting across our operating units onto a modern data platform. We have executive backing and a budget in the low six figures for a first phase. Can we set up a conversation?",
+            "text": "*First Name*: Marcus\n*Last Name*: Feld\n*Email*: <mailto:m.feld@calderwood-industrial-holdings.com|m.feld@calderwood-industrial-holdings.com>\n*Company*: Calderwood Industrial Holdings\n*Message*: We're a diversified industrial holding company and we're looking at consolidating reporting across our operating units onto a modern data platform. We have executive backing and a budget in the low six figures for a first phase. Can we set up a conversation?"
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "NEW RULE \u2014 company unfindable: plausible-sounding but non-existent company"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0008",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0008",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Bethany\n*Last Name*: Okonkwo-Reyes\n*Email*: <mailto:b.okonkwo-reyes@wattswater.com|b.okonkwo-reyes@wattswater.com>\n*Company*: Watts Water Technologies\n*Message*: I lead data engineering here. We're consolidating three regional data warehouses into Snowflake after two acquisitions and we're badly under-resourced \u2014 our team is four people for the whole company. Our CIO has signed off on bringing in a partner for the migration, we're planning around $250k for the first phase with managed operations after cutover.",
+            "text": "*First Name*: Bethany\n*Last Name*: Okonkwo-Reyes\n*Email*: <mailto:b.okonkwo-reyes@wattswater.com|b.okonkwo-reyes@wattswater.com>\n*Company*: Watts Water Technologies\n*Message*: I lead data engineering here. We're consolidating three regional data warehouses into Snowflake after two acquisitions and we're badly under-resourced \u2014 our team is four people for the whole company. Our CIO has signed off on bringing in a partner for the migration, we're planning around $250k for the first phase with managed operations after cutover."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "in_icp",
+      "tests": "ASYMMETRY \u2014 real in-band company, obscure/unfindable individual: person must not count against"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0009",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0009",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Alex\n*Last Name*: Moreno\n*Email*: <mailto:alex@devshop-offshore.biz|alex@devshop-offshore.biz>\n*Company*: OffshoreDevPros\n*Message*: Hi! We noticed your company and wanted to reach out. We provide dedicated offshore developers at $18/hour \u2014 React, Python, data engineering. Can we hop on a quick call this week to discuss partnership opportunities?",
+            "text": "*First Name*: Alex\n*Last Name*: Moreno\n*Email*: <mailto:alex@devshop-offshore.biz|alex@devshop-offshore.biz>\n*Company*: OffshoreDevPros\n*Message*: Hi! We noticed your company and wanted to reach out. We provide dedicated offshore developers at $18/hour \u2014 React, Python, data engineering. Can we hop on a quick call this week to discuss partnership opportunities?"
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "not_evaluated",
+      "tests": "Triage: vendor pitch must never reach ICP assessment"
+    }
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-1000.0010",
+    "payload": {
+      "event": {
+        "type": "message",
+        "subtype": "bot_message",
+        "username": "HubSpot",
+        "ts": "1000.0010",
+        "channel": "C_LOCAL_FIXTURE",
+        "text": "New form submission",
+        "attachments": [
+          {
+            "fallback": "*First Name*: Procurement\n*Last Name*: Team\n*Email*: <mailto:sourcing@bakerhughes.com|sourcing@bakerhughes.com>\n*Company*: Baker Hughes\n*Message*: We are issuing an RFP for data engineering staff augmentation. Scoring is 70% weighted on hourly rate card. Please submit blended rates by role and your MSA terms by the 14th. No calls please \u2014 questions via the portal only.",
+            "text": "*First Name*: Procurement\n*Last Name*: Team\n*Email*: <mailto:sourcing@bakerhughes.com|sourcing@bakerhughes.com>\n*Company*: Baker Hughes\n*Message*: We are issuing an RFP for data engineering staff augmentation. Scoring is 70% weighted on hourly rate card. Please submit blended rates by role and your MSA terms by the 14th. No calls please \u2014 questions via the portal only."
+          }
+        ]
+      }
+    },
+    "_expected": {
+      "verdict": "out_of_icp",
+      "tests": "Rate-shopper: procurement-led, scored on rate card"
+    }
+  }
+]

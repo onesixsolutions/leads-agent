@@ -88,6 +88,23 @@ def collect(
 def backtest_command(
     events_file: Path | None = typer.Argument(None, help="JSON file with collected events (from `collect` command)"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max number of leads to process"),
+    index: list[int] = typer.Option(
+        None,
+        "--index",
+        "-i",
+        help="Process only these leads by 1-based position from --list (repeatable)",
+    ),
+    ts: list[str] = typer.Option(
+        None,
+        "--ts",
+        help="Process only leads with these Slack timestamps (stable across pulls; repeatable)",
+    ),
+    list_only: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="List leads with their index and exit — no LLM calls, costs nothing",
+    ),
     channel_id: str = typer.Option(None, "--channel", "-c", help="Channel ID (defaults to SLACK_CHANNEL_ID)"),
     max_searches: int = typer.Option(4, "--max-searches", help="Max web searches per lead"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Show agent steps and token usage"),
@@ -96,11 +113,22 @@ def backtest_command(
     """
     Run classifier on collected events or Slack history (console output only).
 
-    First collect events with: leads-agent collect --keep 20
-    Then backtest with: leads-agent backtest collected_events.json
+    Never posts to Slack and never adds reactions — use this, not `replay`,
+    to test against real leads.
 
-    Or pull directly from Slack history:
-    leads-agent backtest --channel C123 --history-limit 20
+    Recommended flow for real Slack data (--limit counts LEADS, not messages):
+
+        leads-agent pull-history -n 200 -o channel_history.json
+        leads-agent backtest channel_history.json --list
+        leads-agent backtest channel_history.json --index 12
+
+    --list prints every lead with its index and costs nothing. --index then
+    runs just that lead (repeatable: --index 3 --index 12). Indices shift as
+    new leads arrive, so --ts <slack_ts> selects the same lead permanently.
+
+    Passing --channel instead of a file pulls history inline, but note that
+    --limit is then applied to BOTH the message fetch and the lead cap, so a
+    small value will usually find fewer leads than requested.
     """
     from leads_agent.core import run_backtest
 
@@ -116,7 +144,9 @@ def backtest_command(
         source = channel_id or get_settings().slack_channel_id or "not set"
         rprint(f"[dim]Slack history channel: {source}[/]\n")
 
-    configure_logfire()
+    # Listing makes no model calls, so skip tracing setup entirely.
+    if not list_only:
+        configure_logfire()
 
     run_backtest(
         events_file=events_file,
@@ -125,6 +155,9 @@ def backtest_command(
         max_searches=max_searches,
         debug=debug,
         verbose=verbose,
+        indices=list(index) if index else None,
+        timestamps=list(ts) if ts else None,
+        list_only=list_only,
     )
 
 

@@ -21,7 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      # `write`, not `read`: the action posts its review as a PR comment. For a
+      # pull request GitHub checks this permission even though the REST path is
+      # /issues/{n}/comments, so `read` fails with 403 "Resource not accessible
+      # by integration".
+      pull-requests: write
       issues: write
       id-token: write
 
