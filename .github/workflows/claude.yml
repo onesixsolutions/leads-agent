@@ -20,8 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # Both `write`: this workflow answers @claude mentions, which means
+      # posting a comment back on the PR or issue it was mentioned in.
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
